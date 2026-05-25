@@ -5,6 +5,8 @@
 	output "mega.bin"
 	org 04000h
 
+X_REG_NAME_BASE_HIGH             equ     044D8h    ; Offset-arithmetic base used by X for IX/IY/SP/PC name lookup (=IXIY+8)
+X_REG_NAME_BASE_LOW              equ     044E0h    ; Offset-arithmetic base used by X for 8-bit register name lookup (=IXIY+16)
 PAGE_3_RAM                       equ     0C000h    ; Top of page-3 RAM — destination of COPY_PROTECTION_FAIL's LDIR-wipe payload
 MEGA_PAGE_HEIGHT                 equ     0EC00h    ; Lines-per-page setting; reloaded into DISASM_LINES_LEFT at each page break
 MEGA_SRC_BUF_START               equ     0EC01h    ; Lowest address of the source-text buffer; computed from BIOS_BOTTOM at init
@@ -93,7 +95,10 @@ MEGA_DISASM_HEX_END_C2           equ     0ECE5h    ; Hex-dump end column when `C
 MEGA_LIST_OPND_COL               equ     0ECE6h    ; Operand column inside MEGA_DISASM_LINE for LIST output (offset +35)
 MEGA_LIST_COMMENT_COL            equ     0ECF4h    ; Comment column inside MEGA_DISASM_LINE for LIST output (offset +49)
 MEGA_DISASM_HEX_END_C1           equ     0ECF9h    ; Hex-dump end column when `C 1` (16 bytes/row) mode is active
+MEGA_LIST_LABEL_END              equ     0ED12h    ; Upper bound for ASM_LIST_LABEL_BODY copy when offset-mode is off
+MEGA_DISASM_LINE_END             equ     0ED13h    ; One-past-end sentinel of MEGA_DISASM_LINE — DISASM_CLEAR_LINE predec start
 MEGA_ASM_LINE_BUF                equ     0ED14h    ; Source-line text buffer fed to assembler/SKIP_SPACES_RAW
+MEGA_LIST_LABEL_END_LONG         equ     0ED18h    ; Upper bound when MEGA_LIST_FROM_OFFSET is set (address column suppressed)
 MEGA_LIST_BUF                    equ     0EE16h    ; 256-byte output buffer used by LIST/SAVE; counter at MEGA_LIST_BUF_COUNT
 MEGA_CHANGE_TARGET               equ     0EE18h    ; Replacement-pattern buffer used by CHANGE command (inside MEGA_LIST_BUF region)
 MEGA_TAPE_HDR_FILENAME           equ     0EE27h    ; Filename field in tape header buffer (16 bytes, EE27-EE36)
@@ -348,6 +353,8 @@ Z80_CALL_CC                      equ     000C4h    ; CALL cc,nn (base)
 Z80_PUSH_RP                      equ     000C5h    ; PUSH rp (base)
 Z80_ADD_A_N                      equ     000C6h    ; ADD A,n
 Z80_RST                          equ     000C7h    ; RST p   (base — p in bits 3-5)
+Z80_RST_18                       equ     000DFh    ; RST 18h (also used as "disarmed breakpoint" sentinel)
+CHAR_BS                          equ     00008h    ; ASCII backspace (used by M command edit-back navigation)
 Z80_CALL                         equ     000CDh    ; CALL nn
 Z80_ADC_A_N                      equ     000CEh    ; ADC A,n
 Z80_OUT_N_A                      equ     000D3h    ; OUT (n),A
@@ -437,6 +444,7 @@ BIOS_FILVRM                      equ     00056h    ; Fill VRAM region with a byt
 BIOS_LDIRMV                      equ     00059h    ; Block copy VRAM → main memory
 BIOS_LDIRVM                      equ     0005Ch    ; Block copy main memory → VRAM
 BIOS_INITXT                      equ     0006Ch    ; Initialize VDP to 40×24 text mode
+BIOS_INIT32                      equ     0006Fh    ; Initialize VDP to 32×24 text mode (SCREEN 1)
 BIOS_INIGRP                      equ     00072h    ; Initialize VDP to graphics mode
 BIOS_CALPAT                      equ     00084h    ; Compute sprite-pattern table entry address
 BIOS_CALATR                      equ     00087h    ; Compute sprite-attribute table entry address
@@ -677,7 +685,7 @@ MEGA_INIT_BODY:
         jr      nz,MEGA_INIT_HOOK_CHECK                        ;#4053: 20 27
         ld      hl,SLOT_DRIVER_TEMPLATE_SRC                    ;#4055: 21 5A 42
         ld      de,MEGA_HOOK_FA00                              ;#4058: 11 00 FA
-        ld      bc,30h                                         ;#405B: 01 30 00
+        ld      bc,INPUT_LINE_FROM_KBD-SLOT_DRIVER_TEMPLATE_SRC ;#405B: 01 30 00
         ldir                                                   ;#405E: ED B0
         call    MEGA_INSTALL_DRIVER                            ;#4060: CD 3C 69
         jr      c,MEGA_INIT_HOOK_DISABLE                       ;#4063: 38 0F
@@ -698,7 +706,7 @@ MEGA_INIT_HOOK_DISABLE:
 MEGA_INIT_HOOK_CHECK:
         ; Inspect MEGA_HOOK_FA00 — if F3h (DI = already installed) use default RAM
         ld      a,(MEGA_HOOK_FA00)                             ;#407C: 3A 00 FA
-        cp      0F3h                                           ;#407F: FE F3
+        cp      Z80_DI                                         ;#407F: FE F3
         jr      z,MEGA_INIT_NO_SLOTDRV                         ;#4081: 28 E9
         ld      de,8100h                                       ;#4083: 11 00 81
         ld      hl,0CFFFh                                      ;#4086: 21 FF CF
@@ -755,7 +763,7 @@ MEGA_INIT_BUF_VALIDATE:
         ld      hl,HOUTD_HOOK                                  ;#4101: 21 6F 46
         ld      (BIOS_HOUTD+1),hl                              ;#4104: 22 E5 FE
         ld      (BIOS_HOUTD),a                                 ;#4107: 32 E4 FE
-        ld      a,0DFh                                         ;#410A: 3E DF
+        ld      a,Z80_RST_18                                   ;#410A: 3E DF
         ld      (BREAKPOINT_A_OPCODE),a                        ;#410C: 32 6E EC
         ld      (BREAKPOINT_B_OPCODE),a                        ;#410F: 32 71 EC
 MEGA_PROMPT_LOOP:
@@ -1395,20 +1403,19 @@ PRINT_FLAGS_AS_LETTERS:
         ld      a,(MEGA_USER_FLAGS_SAVE)                       ;#4479: 3A 3E EC
         ld      c,a                                            ;#447C: 4F
         bit     7,c                                            ;#447D: CB 79
-        ld      a,53h                                          ;#447F: 3E 53
+        ld      a,"S"                                          ;#447F: 3E 53
         call    nz,PRINT_CHAR                                  ;#4481: C4 B6 42
         bit     6,c                                            ;#4484: CB 71
-        ld      a,5Ah                                          ;#4486: 3E 5A
+        ld      a,"Z"                                          ;#4486: 3E 5A
         call    nz,PRINT_CHAR                                  ;#4488: C4 B6 42
         bit     2,c                                            ;#448B: CB 51
-        ld      a,56h                                          ;#448D: 3E 56
+        ld      a,"V"                                          ;#448D: 3E 56
         call    nz,PRINT_CHAR                                  ;#448F: C4 B6 42
         bit     0,c                                            ;#4492: CB 41
-        ld      a,43h                                          ;#4494: 3E 43
+        ld      a,"C"                                          ;#4494: 3E 43
         call    nz,PRINT_CHAR                                  ;#4496: C4 B6 42
         ret                                                    ;#4499: C9
-        dec     c                                              ;#449A: 0D
-        db      " A  F  B  C  D  E  H  L", 0Dh                 ;#449B: 20 41 20 20 46 20 20 42 20 20 43 20 20 44 20 20 45 20 20 48 20 20 4C 0D
+        db      0Dh, " A  F  B  C  D  E  H  L", 0Dh            ;#449A: 0D 20 41 20 20 46 20 20 42 20 20 43 20 20 44 20 20 45 20 20 48 20 20 4C 0D
         db      0                                              ;#44B3: 00
         db      " A' F' B' C' D' E' H' L' I", 0Dh              ;#44B4: 20 41 27 20 46 27 20 42 27 20 43 27 20 44 27 20 45 27 20 48 27 20 4C 27 20 49 0D
         db      0                                              ;#44CF: 00
@@ -1446,9 +1453,9 @@ X_REG_DISPATCH:
         ld      l,c                                            ;#450F: 69
         ld      a,c                                            ;#4510: 79
         cp      4                                              ;#4511: FE 04
-        ld      de,44D8h                                       ;#4513: 11 D8 44
+        ld      de,X_REG_NAME_BASE_HIGH                        ;#4513: 11 D8 44
         jr      nc,X_REG_INDEX_BC                              ;#4516: 30 04
-        ld      de,44E0h                                       ;#4518: 11 E0 44
+        ld      de,X_REG_NAME_BASE_LOW                         ;#4518: 11 E0 44
         add     hl,hl                                          ;#451B: 29
 X_REG_INDEX_BC:
         ; Compute HL = name-table offset (C*4 + B) for the chosen register
@@ -1494,7 +1501,7 @@ X_REG_PRINT_PAD_LOOP:
 
 X_REG_INPUT_CR_CHECK:
         ; Raw-hex path: not a hex digit — test for CR (commit) vs nav key
-        cp      0Dh                                            ;#4558: FE 0D
+        cp      "\r"                                           ;#4558: FE 0D
         jr      nz,X_REG_INPUT_NAV                             ;#455A: 20 03
         ld      (hl),b                                         ;#455C: 70
         jr      X_PRINT_CR_TAIL                                ;#455D: 18 53
@@ -1694,14 +1701,14 @@ MEGA_PCMD_G_INSTALL_BP_B:
         ld      (MEGA_BP_B_ADDR),hl                            ;#4646: 22 72 EC
         ld      a,(hl)                                         ;#4649: 7E
         ld      (BREAKPOINT_B_OPCODE),a                        ;#464A: 32 71 EC
-        ld      (hl),0DFh                                      ;#464D: 36 DF
+        ld      (hl),Z80_RST_18                                ;#464D: 36 DF
 MEGA_PCMD_G_INSTALL_BP_A:
         ; Install RST8h at bp1's address (reached whenever ≥1 breakpoint was parsed)
         ex      de,hl                                          ;#464F: EB
         ld      (MEGA_BP_A_ADDR),hl                            ;#4650: 22 6F EC
         ld      a,(hl)                                         ;#4653: 7E
         ld      (BREAKPOINT_A_OPCODE),a                        ;#4654: 32 6E EC
-        ld      (hl),0DFh                                      ;#4657: 36 DF
+        ld      (hl),Z80_RST_18                                ;#4657: 36 DF
         pop     de                                             ;#4659: D1
 MEGA_PCMD_G_LAUNCH_USER:
         ; Stash run address in MEGA_ASM_STATE_AREA, restore user CPU state, jp via stack
@@ -1744,14 +1751,14 @@ HOUTD_HOOK:
         ld      d,(hl)                                         ;#4678: 56
         dec     de                                             ;#4679: 1B
         ld      a,(BREAKPOINT_A_OPCODE)                        ;#467A: 3A 6E EC
-        cp      0DFh                                           ;#467D: FE DF
+        cp      Z80_RST_18                                     ;#467D: FE DF
         jr      z,HOUTD_HOOK_PASSTHROUGH                       ;#467F: 28 17
         ld      hl,(MEGA_BP_A_ADDR)                            ;#4681: 2A 6F EC
         or      a                                              ;#4684: B7
         sbc     hl,de                                          ;#4685: ED 52
         jr      z,HOUTD_HOOK_BP_HIT                            ;#4687: 28 15
         ld      a,(BREAKPOINT_B_OPCODE)                        ;#4689: 3A 71 EC
-        cp      0DFh                                           ;#468C: FE DF
+        cp      Z80_RST_18                                     ;#468C: FE DF
         jr      z,HOUTD_HOOK_PASSTHROUGH                       ;#468E: 28 08
         ld      hl,(MEGA_BP_B_ADDR)                            ;#4690: 2A 72 EC
         or      a                                              ;#4693: B7
@@ -1788,12 +1795,12 @@ HOUTD_HOOK_SAVE_PV:
         ld      sp,(MEGA_SAVED_SP)                             ;#46BC: ED 7B FC F9
         call    X_SAVE_USER_CONTEXT                            ;#46C0: CD DB 45
         ld      a,(BREAKPOINT_A_OPCODE)                        ;#46C3: 3A 6E EC
-        cp      0DFh                                           ;#46C6: FE DF
+        cp      Z80_RST_18                                     ;#46C6: FE DF
         jr      z,HOUTD_HOOK_DISARM_BPS                        ;#46C8: 28 0F
         ld      hl,(MEGA_BP_A_ADDR)                            ;#46CA: 2A 6F EC
         ld      (hl),a                                         ;#46CD: 77
         ld      a,(BREAKPOINT_B_OPCODE)                        ;#46CE: 3A 71 EC
-        cp      0DFh                                           ;#46D1: FE DF
+        cp      Z80_RST_18                                     ;#46D1: FE DF
         jr      z,HOUTD_HOOK_DISARM_BPS                        ;#46D3: 28 04
         ld      hl,(MEGA_BP_B_ADDR)                            ;#46D5: 2A 72 EC
         ld      (hl),a                                         ;#46D8: 77
@@ -1804,7 +1811,7 @@ HOUTD_HOOK_DISARM_BPS:
         ld      (BREAKPOINT_B_OPCODE),a                        ;#46DE: 32 71 EC
         ld      a,(BIOS_SCRMOD)                                ;#46E1: 3A AF FC
         cp      2                                              ;#46E4: FE 02
-        call    nc,6Fh                                         ;#46E6: D4 6F 00
+        call    nc,BIOS_INIT32                                 ;#46E6: D4 6F 00
         call    MEGA_PCMD_X_SHOW                               ;#46E9: CD 30 44
         jp      MEGA_RESUME_PROMPT                             ;#46EC: C3 4D 43
 
@@ -1938,13 +1945,13 @@ MEM_EDIT_KEY_DISPATCH:
         ; Non-hex first-key dispatch: SPACE = skip / BS = back / CR = exit
         cp      " "                                            ;#4789: FE 20
         jr      z,MEM_EDIT_SKIP_BYTE                           ;#478B: 28 0F
-        cp      8                                              ;#478D: FE 08
+        cp      CHAR_BS                                        ;#478D: FE 08
         jr      z,MEM_EDIT_BACK                                ;#478F: 28 10
-        cp      0Dh                                            ;#4791: FE 0D
+        cp      "\r"                                           ;#4791: FE 0D
         jr      z,MEM_EDIT_EXIT                                ;#4793: 28 14
 MEM_EDIT_CR_GUARD:
         ; CR after a partial 1-digit input: commit if CR, else jr to ?-bell error
-        cp      0Dh                                            ;#4795: FE 0D
+        cp      "\r"                                           ;#4795: FE 0D
         jr      nz,MEM_EDIT_BAD_KEY                            ;#4797: 20 0B
         ld      (hl),b                                         ;#4799: 70
         jr      MEM_EDIT_EXIT                                  ;#479A: 18 0D
@@ -4677,11 +4684,11 @@ ASM_LIST_COMMENT_ONLY:
         ld      hl,MEGA_LIST_LABEL_COL                         ;#56D3: 21 DA EC
 ASM_LIST_COPY_LABEL_INIT:
         ; Init BC=ED12h bound before ASM_LIST_LABEL_BODY copy
-        ld      bc,0ED12h                                      ;#56D6: 01 12 ED
+        ld      bc,MEGA_LIST_LABEL_END                         ;#56D6: 01 12 ED
         ld      a,(MEGA_LIST_FROM_OFFSET)                      ;#56D9: 3A 6B EC
         or      a                                              ;#56DC: B7
         jr      z,ASM_LIST_LABEL_BODY                          ;#56DD: 28 03
-        ld      bc,0ED18h                                      ;#56DF: 01 18 ED
+        ld      bc,MEGA_LIST_LABEL_END_LONG                    ;#56DF: 01 18 ED
 ASM_LIST_LABEL_BODY:
         ; Per-char copy of label name into MEGA_LIST_BUF; loops back if not overflow
         ld      a,(de)                                         ;#56E2: 1A
@@ -6211,7 +6218,7 @@ ASM_HEX_LIT_B_CHECK:
         ld      a,(hl)                                         ;#5F00: 7E
         dec     hl                                             ;#5F01: 2B
         call    IS_HEX_CHAR_AF                                 ;#5F02: CD 71 5F
-        ld      a,42h                                          ;#5F05: 3E 42
+        ld      a,"B"                                          ;#5F05: 3E 42
         jr      nc,ASM_HEX_LIT_2_THRU_9                        ;#5F07: 30 DB
         jp      ASM_PARSE_DECIMAL                              ;#5F09: C3 54 5F
 
@@ -7145,7 +7152,7 @@ DISASM_EMIT_CR:
 
 DISASM_CLEAR_LINE:
         ; Fill MEGA_DISASM_LINE with 80 spaces, leaving iy at the start of the buffer
-        ld      iy,0ED13h                                      ;#644B: FD 21 13 ED
+        ld      iy,MEGA_DISASM_LINE_END                        ;#644B: FD 21 13 ED
         ld      a,50h                                          ;#644F: 3E 50
 DISASM_CLEAR_LINE_LOOP:
         ; Per-byte body: dec iy, store ' ' in 80 bytes (predec form)
@@ -7972,7 +7979,7 @@ MEGA_INSTALL_SLTTBL_LOOP:
         jr      z,MEGA_INSTALL_DRIVER_FAIL                     ;#6980: 28 10
         ld      hl,RESIDENT_DRIVER_SRC                         ;#6982: 21 F0 69
         ld      de,DRIVER_INIT_SLOTS                           ;#6985: 11 00 C1
-        ld      bc,0C4h                                        ;#6988: 01 C4 00
+        ld      bc,MEGA_TOP_BANNER-RESIDENT_DRIVER_SRC         ;#6988: 01 C4 00
         ldir                                                   ;#698B: ED B0
         call    DRIVER_INIT_SLOTS                              ;#698D: CD 00 C1
         or      a                                              ;#6990: B7
