@@ -5,8 +5,6 @@
 	output "mega.bin"
 	org 04000h
 
-X_REG_NAME_BASE_HIGH             equ     044D8h    ; Offset-arithmetic base used by X for IX/IY/SP/PC name lookup (=IXIY+8)
-X_REG_NAME_BASE_LOW              equ     044E0h    ; Offset-arithmetic base used by X for 8-bit register name lookup (=IXIY+16)
 PAGE_3_RAM                       equ     0C000h    ; Top of page-3 RAM — destination of COPY_PROTECTION_FAIL's LDIR-wipe payload
 MEGA_PAGE_HEIGHT                 equ     0EC00h    ; Lines-per-page setting; reloaded into DISASM_LINES_LEFT at each page break
 MEGA_SRC_BUF_START               equ     0EC01h    ; Lowest address of the source-text buffer; computed from BIOS_BOTTOM at init
@@ -23,7 +21,7 @@ MEGA_LIST_LINE_PTR               equ     0EC18h    ; Address of the current sour
 MEGA_SEARCH_PATTERN              equ     0EC1Ah    ; Pointer to the search-pattern string (SEARCH/FIND/CHANGE)
 MEGA_CHANGE_REPLACE              equ     0EC1Ch    ; Pointer to the CHANGE replacement string (after the second '/' separator)
 MEGA_CHANGE_SRC_PTR              equ     0EC1Eh    ; Source-line walk pointer during CHANGE / DELETE byte-by-byte rewrite
-MEGA_CHANGE_DST_PTR              equ     0EC20h    ; Destination pointer (in scratch at EE18) where CHANGE writes the rebuilt line
+MEGA_CHANGE_DST_PTR              equ     0EC20h    ; Pointer into MEGA_CHANGE_TARGET where CHANGE writes the rebuilt line
 MEGA_LINE_RANGE_END              equ     0EC22h    ; End source-line pointer for DELETE / CHANGE / RENUM range operations
 MEGA_AUTO_FIRST_ARG              equ     0EC24h    ; First arg of AUTO (line-number start) stashed by AUTO_PARSE_ARGS at 5005h
 MEGA_CHANGE_FOUND                equ     0EC25h    ; Set/cleared by CHANGE to mark whether the search pattern matched in this line
@@ -34,7 +32,7 @@ MEGA_USER_REGS_SAVE              equ     0EC2Bh    ; User-program register snaps
 MEGA_I_REG_SAVE                  equ     0EC2Fh    ; Saved Z80 I (interrupt page) register from before the assembler took over
 MEGA_USER_FLAGS_SAVE             equ     0EC3Eh    ; Saved F register printed by PRINT_FLAGS_AS_LETTERS as S/Z/V/C glyphs
 MEGA_USER_REGS_TAIL              equ     0EC3Fh    ; End of the 8-byte saved-register block (EC37..EC3F walked by MEGA_PCMD_X_SHOW)
-MEGA_ASM_STACK_TOP               equ     0EC40h    ; Initial SP for the assembler's private stack (grows downward into EC3F..EC27)
+MEGA_ASM_STACK_TOP               equ     0EC40h    ; Initial SP for the assembler's private stack (grows into MEGA_USER_REGS_SAVE)
 MEGA_SAVED_SP_X                  equ     0EC41h    ; Word slot saving caller SP before MEGA_PCMD_X/G switches to the assembler stack
 MEGA_LAST_MEM_ADDR               equ     0EC43h    ; Last-accessed address — remembered between successive `M addr` invocations
 MEGA_DISASM_LAST_END             equ     0EC45h    ; Last-disassembled instruction end address — boot-zeroed, updated per-instr
@@ -42,9 +40,9 @@ DISASM_SPECIAL_MATCH_FLAG        equ     0EC47h    ; FFh after DISASM_SPECIAL_DI
 MEGA_SYM_TABLE_BASE              equ     0EC49h    ; Pointer to the start of the assembler's symbol table (walked by LOOKUP_LABEL)
 MEGA_SYM_TABLE_END               equ     0EC4Bh    ; Upper bound of the symbol table (set to user-code-region end at boot)
 MEGA_ASM_PASS2_START             equ     0EC4Dh    ; Saved MEGA_SRC_BUF_START at MEGA_ASSEMBLE entry; seeds MEGA_ASM_PASS2_CURSOR
-MEGA_ASM_PASS2_CURSOR            equ     0EC4Fh    ; PASS-2 cursor stash for line emission (saved/restored at 523D / 5245 / 527F)
+MEGA_ASM_PASS2_CURSOR            equ     0EC4Fh    ; PASS-2 cursor stash for line emission (saved/restored by ASM_FETCH_NEXT_LINE)
 MEGA_ASM_OPERAND_VAL             equ     0EC51h    ; Parsed operand value (16-bit): ASM_PARSE_EXPRESSION writes, encoders read
-MEGA_ASM_OPERAND_VAL_HI          equ     0EC52h    ; High byte of MEGA_ASM_OPERAND_VAL (16-bit operand value, low at EC51)
+MEGA_ASM_OPERAND_VAL_HI          equ     0EC52h    ; High byte of the 16-bit MEGA_ASM_OPERAND_VAL
 MEGA_ASM_IXY_DISP                equ     0EC53h    ; IXY displacement byte (the `±d` of `(IX+d)`) parsed by ASM_PARSE_OPERAND
 MEGA_ASM_OPERAND_FLAG            equ     0EC54h    ; Per-operand transient flag — set during parse, cleared by ASM_EMIT_OPCODE
 MEGA_ASM_OPC_FLAGS               equ     0EC55h    ; Modifier flags: bit 1 = FD (IY) vs DD (IX), bit 2 = needs prefix
@@ -108,11 +106,11 @@ MEGA_STATE_FLAGS                 equ     0F9F5h    ; 1-byte flag register read v
 MEGA_ASM_PASS_FLAG               equ     0F9F6h    ; Cleared at MEGA_ASSEMBLE entry; signals PASS-1/PASS-2 phase to inner emitters
 MEGA_ASM_LINE_FLAG               equ     0F9F7h    ; Per-line "active-emit" flag, cleared by 52A9 at start of each PASS-1 line
 MEGA_ASM_RELOC_OFFSET            equ     0F9F8h    ; Offset added to MEGA_DISASM_CURSOR for actual write address (PASS-2)
-MEGA_SAVED_HL                    equ     0F9FAh    ; HL stash on entry to MEGA_INIT_BODY (`ld (F9FAh),hl` at 404A)
+MEGA_SAVED_HL                    equ     0F9FAh    ; HL stash on entry to MEGA_INIT_BODY
 MEGA_SAVED_SP                    equ     0F9FCh    ; SP stash on entry to MEGA_INIT_BODY — restored at top of MEGA_PROMPT_LOOP
 MEGA_INPUT_LINE_PTR              equ     0F9FEh    ; Pointer into the current input line consumed by MEGA_PROMPT_TICK
-MEGA_HOOK_SLOT_PATCH             equ     0FA03h    ; SMC primary-slot byte inside MEGA_HOOK_FA00 (cart slot for `out (A8h),a`)
-MEGA_HOOK_SUBSLOT_PATCH          equ     0FA0Ah    ; SMC subslot byte inside MEGA_HOOK_FA08 — cart subslot for FFFFh write
+MEGA_SLOT_ENTER_PATCH            equ     0FA03h    ; SMC byte — foreign primary-slot byte (patched at boot by MEGA_INSTALL_DRIVER)
+MEGA_SLOT_LEAVE_PATCH            equ     0FA0Ah    ; SMC byte — home primary-slot byte (patched at boot from BIOS slot register)
 MEGA_HEADER_TYPE                 equ     0FA30h    ; Cassette-header type marker (D0/D3/EAh) AND scratch start-addr for DM/ZAP
 MEGA_SLOT_PATCH                  equ     0FA31h    ; High byte of FA30 — used as subslot patch storage by MEGA_INSTALL_DRIVER
 MEGA_SCRATCH_W2                  equ     0FA32h    ; Second word of the FA30 scratch — `dst` for COPY*, `end` for DM/ZAP, etc.
@@ -355,6 +353,14 @@ Z80_ADD_A_N                      equ     000C6h    ; ADD A,n
 Z80_RST                          equ     000C7h    ; RST p   (base — p in bits 3-5)
 Z80_RST_18                       equ     000DFh    ; RST 18h (also used as "disarmed breakpoint" sentinel)
 CHAR_BS                          equ     00008h    ; ASCII backspace (used by M command edit-back navigation)
+CHAR_ESC                         equ     0001Bh    ; ASCII escape (editor exit key, paged-listing exit key)
+CHAR_CURSOR_RIGHT                equ     0001Ch    ; MSX cursor-key code (CHGET) — see documents/msx_keyboard_codes.md
+CHAR_CURSOR_LEFT                 equ     0001Dh    ; MSX cursor-key code (CHGET) — see documents/msx_keyboard_codes.md
+CHAR_CURSOR_UP                   equ     0001Eh    ; MSX cursor-key code (CHGET) — see documents/msx_keyboard_codes.md
+CHAR_CURSOR_DOWN                 equ     0001Fh    ; MSX cursor-key code (CHGET) — see documents/msx_keyboard_codes.md
+BASIC_TOK_INT                    equ     0001Ch    ; MSX BASIC tokenizer: 2-byte 16-bit integer literal follows
+BASIC_TOK_SINGLE                 equ     0001Dh    ; MSX BASIC tokenizer: 4-byte single-precision float follows
+BASIC_TOK_DOUBLE                 equ     0001Fh    ; MSX BASIC tokenizer: 8-byte double-precision float follows
 Z80_CALL                         equ     000CDh    ; CALL nn
 Z80_ADC_A_N                      equ     000CEh    ; ADC A,n
 Z80_OUT_N_A                      equ     000D3h    ; OUT (n),A
@@ -633,7 +639,7 @@ MEGA_CMD_START:
         ; `CALL START` handler (C=1); falls into MEGA_INIT_PREP for a full init
         ld      c,1                                            ;#4017: 0E 01
 MEGA_INIT_PREP:
-        ; Shared body — saves BIOS_DIRBUF pointer to ECC1h, lowers it to SP-300h
+        ; Shared body — save BIOS_DIRBUF to MEGA_DIRBUF_SAV, lower it to SP-300h
         ; Saves the BIOS_DIRBUF cell (F351h) into MEGA_DIRBUF_SAV (ECC1h),
         ; then computes SP-300h (the `ld hl,FD00h ; add hl,sp` trick — FD00h
         ; is -300h in 16-bit two's complement) and writes that back to F351h.
@@ -684,14 +690,14 @@ MEGA_INIT_BODY:
         dec     c                                              ;#4052: 0D
         jr      nz,MEGA_INIT_HOOK_CHECK                        ;#4053: 20 27
         ld      hl,SLOT_DRIVER_TEMPLATE_SRC                    ;#4055: 21 5A 42
-        ld      de,MEGA_HOOK_FA00                              ;#4058: 11 00 FA
+        ld      de,MEGA_SLOT_ENTER                             ;#4058: 11 00 FA
         ld      bc,INPUT_LINE_FROM_KBD-SLOT_DRIVER_TEMPLATE_SRC ;#405B: 01 30 00
         ldir                                                   ;#405E: ED B0
         call    MEGA_INSTALL_DRIVER                            ;#4060: CD 3C 69
         jr      c,MEGA_INIT_HOOK_DISABLE                       ;#4063: 38 0F
-        ld      (MEGA_HOOK_SLOT_PATCH),a                       ;#4065: 32 03 FA
+        ld      (MEGA_SLOT_ENTER_PATCH),a                      ;#4065: 32 03 FA
         ld      a,b                                            ;#4068: 78
-        ld      (MEGA_HOOK_SUBSLOT_PATCH),a                    ;#4069: 32 0A FA
+        ld      (MEGA_SLOT_LEAVE_PATCH),a                      ;#4069: 32 0A FA
 MEGA_INIT_NO_SLOTDRV:
         ; Skip-slot-driver path — set RAM range DE=1, HL=7FFFh, fall into INSTALL_BUFFERS
         ld      de,1                                           ;#406C: 11 01 00
@@ -699,13 +705,13 @@ MEGA_INIT_NO_SLOTDRV:
         jr      MEGA_INSTALL_BUFFERS                           ;#4072: 18 1F
 
 MEGA_INIT_HOOK_DISABLE:
-        ; Slot-driver install failed — write Z80_RET into MEGA_HOOK_FA00/08
+        ; Slot-driver install failed — write Z80_RET into MEGA_SLOT_ENTER/_LEAVE
         ld      a,Z80_RET                                      ;#4074: 3E C9
-        ld      (MEGA_HOOK_FA00),a                             ;#4076: 32 00 FA
-        ld      (MEGA_HOOK_FA08),a                             ;#4079: 32 08 FA
+        ld      (MEGA_SLOT_ENTER),a                            ;#4076: 32 00 FA
+        ld      (MEGA_SLOT_LEAVE),a                            ;#4079: 32 08 FA
 MEGA_INIT_HOOK_CHECK:
-        ; Inspect MEGA_HOOK_FA00 — if F3h (DI = already installed) use default RAM
-        ld      a,(MEGA_HOOK_FA00)                             ;#407C: 3A 00 FA
+        ; Inspect MEGA_SLOT_ENTER — if F3h (DI = already installed) use default RAM
+        ld      a,(MEGA_SLOT_ENTER)                            ;#407C: 3A 00 FA
         cp      Z80_DI                                         ;#407F: FE F3
         jr      z,MEGA_INIT_NO_SLOTDRV                         ;#4081: 28 E9
         ld      de,8100h                                       ;#4083: 11 00 81
@@ -780,7 +786,7 @@ PROMPT_TICK_AFTER_RESET:
         ; Mid-TICK entry that skips SP reset; clears MEGA_STATE_FLAGS via ld (ix),0
         ld      (ix),0                                         ;#4128: DD 36 00 00
 PROMPT_TICK_PRESERVE_FLAGS:
-        ; Re-entry that skips both SP reset and the flag-clear; reached from AUTO 4189
+        ; Re-entry: skip SP reset + flag-clear; reached from PROMPT_TICK_LINE_INSERT
         bit     3,(ix)                                         ;#412C: DD CB 00 5E
         jr      nz,PROMPT_TICK_READ_LINE                       ;#4130: 20 10
         bit     7,(ix)                                         ;#4132: DD CB 00 7E
@@ -795,7 +801,7 @@ PROMPT_TICK_PROMPT:
         ld      a,">"                                          ;#413D: 3E 3E
         call    PRINT_CHAR                                     ;#413F: CD B6 42
 PROMPT_TICK_READ_LINE:
-        ; Restore SP and call READ_INPUT_LINE (4B92h) with TICK pushed as return
+        ; Restore SP and call READ_INPUT_LINE with TICK pushed as return
         ld      sp,(MEGA_SAVED_SP)                             ;#4142: ED 7B FC F9
         ld      hl,MEGA_PROMPT_TICK                            ;#4146: 21 19 41
         push    hl                                             ;#4149: E5
@@ -840,7 +846,7 @@ PROMPT_TICK_LINE_INSERT:
         jp      PROMPT_TICK_PRESERVE_FLAGS                     ;#4189: C3 2C 41
 
 PROMPT_TICK_PCMD_LOOKUP:
-        ; Walk MEGA_PCMD_TABLE (6B45) looking for a name match
+        ; Walk MEGA_PCMD_TABLE looking for a name match
         ld      de,MEGA_PCMD_TABLE                             ;#418C: 11 45 6B
 PCMD_LOOKUP_NEXT:
         ; Per-record entry of PROMPT_TICK_PCMD_LOOKUP — push HL, read next name byte
@@ -961,28 +967,31 @@ PRINT_LABEL_TABLE_FULL:
         nop                                                    ;#4259: 00
 
 SLOT_DRIVER_TEMPLATE_SRC:
-        ; ROM source of the 48-byte slot-switching driver (LDIRed to FA00h)
+        ; ROM source of the 48-byte slot-switching driver (LDIRed to MEGA_SLOT_ENTER)
 
         phase   0FA00h
-MEGA_HOOK_FA00:
-        ; RAM hook slot 0 — slot-switch entry; patched with RET (C=0) or driver (C=1)
-        ; 48-byte slot-switching driver, copied to MEGA_HOOK_FA00 (FA00h) by
+MEGA_SLOT_ENTER:
+        ; DI + switch primary slot to FOREIGN (cart) slot via `out (A8h),a` + ret
+        ; 48-byte slot-switching driver, copied to MEGA_SLOT_ENTER (FA00h) by
         ; MEGA_INIT_BODY's LDIR (4055..405Eh) on the C=1 (CALL START) path. The
         ; `[phase]` directive makes labels inside the region resolve to their runtime
         ; addresses (FA00..FA2F), which is where every `call MEGA_SLOT_*` site in
         ; the cart jumps to.
         ; Layout (8/8/6/6/6/7/7 = 48 bytes):
-        ; FA00 MEGA_HOOK_FA00     DI; switch primary slot (A8h) to template byte; ret
-        ; FA08 MEGA_HOOK_FA08     same body, but EI before returning (used as exit)
-        ; FA10 MEGA_SLOT_WRITE    `ld (hl),a` between two slot switches
-        ; FA16 MEGA_SLOT_READ_HL  `ld a,(hl)`
-        ; FA1C MEGA_SLOT_READ_DE  `ld a,(de)`
-        ; FA22 MEGA_SLOT_LDIR     block copy
-        ; FA29 MEGA_SLOT_LDDR     reverse block copy
-        ; The `ld a,0` immediate at FA02/FA09 is a template byte that the installer
-        ; at 693Ch patches with the cart's actual slot byte so the switch-back
-        ; targets the correct slot. (The decoded `0` in the asm is the unmodified
-        ; template value; at runtime the literal differs per host machine.)
+        ; FA00 MEGA_SLOT_ENTER    DI; out (A8h),FOREIGN-slot; ret  (switch INTO cart)
+        ; FA08 MEGA_SLOT_LEAVE    out (A8h),HOME-slot; EI; ret     (switch BACK to BIOS)
+        ; FA10 MEGA_SLOT_WRITE    ENTER + ld (hl),a + LEAVE   — slot-switched store
+        ; FA16 MEGA_SLOT_READ_HL  ENTER + ld a,(hl) + LEAVE   — slot-switched load
+        ; FA1C MEGA_SLOT_READ_DE  ENTER + ld a,(de) + LEAVE   — load via DE
+        ; FA22 MEGA_SLOT_LDIR     ENTER + ldir + LEAVE        — block copy
+        ; FA29 MEGA_SLOT_LDDR     ENTER + lddr + LEAVE        — reverse block copy
+        ; Each helper sandwiches its operation between `call MEGA_SLOT_ENTER` and
+        ; `jr MEGA_SLOT_LEAVE`. The two `ld a,0` immediates (at FA02 inside ENTER
+        ; and FA09 inside LEAVE) are SMC patch slots: MEGA_INIT_BODY's slot-prober
+        ; writes the foreign cart slot to FA03 (MEGA_SLOT_ENTER_PATCH) and the
+        ; home BIOS slot to FA0A (MEGA_SLOT_LEAVE_PATCH) before the resident driver
+        ; becomes usable. (The decoded `0` in the asm is the unmodified template
+        ; value; at runtime the literal differs per host machine.)
         di                                                     ;#FA00: F3
         push    af                                             ;#FA01: F5
         ld      a,0                                            ;#FA02: 3E 00
@@ -990,46 +999,46 @@ MEGA_HOOK_FA00:
         pop     af                                             ;#FA06: F1
         ret                                                    ;#FA07: C9
 
-MEGA_HOOK_FA08:
-        ; RAM hook slot 1 — restores slot, EI variant
+MEGA_SLOT_LEAVE:
+        ; Switch primary slot back to HOME (BIOS) slot via `out (A8h),a` + EI + ret
         push    af                                             ;#FA08: F5
         ld      a,0                                            ;#FA09: 3E 00
         out     (0A8h),a                                       ;#FA0B: D3 A8
         pop     af                                             ;#FA0D: F1
 MEGA_HOOK_EI_PATCH:
-        ; SMC byte inside MEGA_HOOK_FA08 — 0FBh = EI, 0 = disabled (cassette routes patch)
+        ; SMC byte inside MEGA_SLOT_LEAVE — 0FBh = EI, 00h = NOP (tape ops suppress EI)
         ei                                                     ;#FA0E: FB
         ret                                                    ;#FA0F: C9
 
 MEGA_SLOT_WRITE:
         ; Slot-switched write helper — `ld (hl),a` in the foreign slot, then restore
-        call    MEGA_HOOK_FA00                                 ;#FA10: CD 00 FA
+        call    MEGA_SLOT_ENTER                                ;#FA10: CD 00 FA
         ld      (hl),a                                         ;#FA13: 77
-        jr      MEGA_HOOK_FA08                                 ;#FA14: 18 F2
+        jr      MEGA_SLOT_LEAVE                                ;#FA14: 18 F2
 
 MEGA_SLOT_READ_HL:
         ; Slot-switched read helper — `ld a,(hl)` in the foreign slot, then restore
-        call    MEGA_HOOK_FA00                                 ;#FA16: CD 00 FA
+        call    MEGA_SLOT_ENTER                                ;#FA16: CD 00 FA
         ld      a,(hl)                                         ;#FA19: 7E
-        jr      MEGA_HOOK_FA08                                 ;#FA1A: 18 EC
+        jr      MEGA_SLOT_LEAVE                                ;#FA1A: 18 EC
 
 MEGA_SLOT_READ_DE:
         ; Slot-switched read helper — `ld a,(de)` in the foreign slot, then restore
-        call    MEGA_HOOK_FA00                                 ;#FA1C: CD 00 FA
+        call    MEGA_SLOT_ENTER                                ;#FA1C: CD 00 FA
         ld      a,(de)                                         ;#FA1F: 1A
-        jr      MEGA_HOOK_FA08                                 ;#FA20: 18 E6
+        jr      MEGA_SLOT_LEAVE                                ;#FA20: 18 E6
 
 MEGA_SLOT_LDIR:
         ; Slot-switched block copy (LDIR) helper
-        call    MEGA_HOOK_FA00                                 ;#FA22: CD 00 FA
+        call    MEGA_SLOT_ENTER                                ;#FA22: CD 00 FA
         ldir                                                   ;#FA25: ED B0
-        jr      MEGA_HOOK_FA08                                 ;#FA27: 18 DF
+        jr      MEGA_SLOT_LEAVE                                ;#FA27: 18 DF
 
 MEGA_SLOT_LDDR:
         ; Slot-switched reverse block copy (LDDR) helper
-        call    MEGA_HOOK_FA00                                 ;#FA29: CD 00 FA
+        call    MEGA_SLOT_ENTER                                ;#FA29: CD 00 FA
         lddr                                                   ;#FA2C: ED B8
-        jr      MEGA_HOOK_FA08                                 ;#FA2E: 18 D8
+        jr      MEGA_SLOT_LEAVE                                ;#FA2E: 18 D8
         dephase
 
 INPUT_LINE_FROM_KBD:
@@ -1066,7 +1075,7 @@ PRINT_CR:
 PRINT_CHAR:
         ; Print A via BIOS_CHPUT (screen) and CR→CR+LF expansion
         call    BIOS_CHPUT                                     ;#42B6: CD A2 00
-        cp      0Dh                                            ;#42B9: FE 0D
+        cp      "\r"                                           ;#42B9: FE 0D
         ret     nz                                             ;#42BB: C0
         ld      a,"\n"                                         ;#42BC: 3E 0A
         call    BIOS_CHPUT                                     ;#42BE: CD A2 00
@@ -1082,7 +1091,7 @@ LPT_OUT_WITH_LF:
         ; BIOS_LPTOUT wrapper: emit A; if A was CR (0Dh), recurse with 0Ah for CRLF
         call    BIOS_LPTOUT                                    ;#42CC: CD A5 00
         jp      c,SYNTAX_ERROR                                 ;#42CF: DA B9 41
-        cp      0Dh                                            ;#42D2: FE 0D
+        cp      "\r"                                           ;#42D2: FE 0D
         ret     nz                                             ;#42D4: C0
         ld      a,"\n"                                         ;#42D5: 3E 0A
         call    LPT_OUT_WITH_LF                                ;#42D7: CD CC 42
@@ -1307,7 +1316,7 @@ INIT_ASSEMBLER_STATE:
         ld      b,19h                                          ;#43FD: 06 19
         xor     a                                              ;#43FF: AF
 INIT_ASM_STATE_ZERO_LOOP:
-        ; Per-byte body — zero 19h-byte ASM scratch at EC27h
+        ; Per-byte body — zero 25-byte assembler scratch at MEGA_ASM_STATE_AREA
         ld      (hl),a                                         ;#4400: 77
         inc     hl                                             ;#4401: 23
         djnz    INIT_ASM_STATE_ZERO_LOOP                       ;#4402: 10 FC
@@ -1355,10 +1364,10 @@ MEGA_PCMD_X:
 MEGA_PCMD_X_SHOW:
         ; Dump saved register snapshot (no-arg path)
         call    PRINT_NUL_STRING_INDIRECT                      ;#4430: CD 14 44
-        sbc     a,d                                            ;#4433: 9A
-        ld      b,h                                            ;#4434: 44
+        dw      REGISTER_DUMP_HEADER_MAIN                      ;#4433: 9A 44
         ld      b,8                                            ;#4435: 06 08
         ld      hl,MEGA_USER_REGS_TAIL                         ;#4437: 21 3F EC
+
 MEGA_PCMD_X_DUMP_BYTE:
         ; Per-byte body — print 8 saved single-reg bytes as hex
         call    PRINT_SPACE                                    ;#443A: CD ED 43
@@ -1369,9 +1378,9 @@ MEGA_PCMD_X_DUMP_BYTE:
         call    PRINT_FLAGS_AS_LETTERS                         ;#4444: CD 76 44
         call    PRINT_CR                                       ;#4447: CD B4 42
         call    PRINT_NUL_STRING_INDIRECT                      ;#444A: CD 14 44
-        or      h                                              ;#444D: B4
-        ld      b,h                                            ;#444E: 44
+        dw      REGISTER_DUMP_HEADER_PRIMED                    ;#444D: B4 44
         ld      b,9                                            ;#444F: 06 09
+
 MEGA_PCMD_X_DUMP_WORD:
         ; Per-byte body — print 9 saved word-reg bytes as hex
         call    PRINT_SPACE                                    ;#4451: CD ED 43
@@ -1381,9 +1390,9 @@ MEGA_PCMD_X_DUMP_WORD:
         djnz    MEGA_PCMD_X_DUMP_WORD                          ;#4459: 10 F6
         call    PRINT_CR                                       ;#445B: CD B4 42
         call    PRINT_NUL_STRING_INDIRECT                      ;#445E: CD 14 44
-        ret     nc                                             ;#4461: D0
-        ld      b,h                                            ;#4462: 44
+        dw      REGISTER_DUMP_HEADER_IXIY                      ;#4461: D0 44
         ld      b,4                                            ;#4463: 06 04
+
 MEGA_PCMD_X_DUMP_PAIR:
         ; Per-pair body — print 4 saved register pairs as hex words
         call    PRINT_SPACE                                    ;#4465: CD ED 43
@@ -1398,7 +1407,7 @@ MEGA_PCMD_X_DUMP_PAIR:
         jp      PRINT_CR                                       ;#4473: C3 B4 42
 
 PRINT_FLAGS_AS_LETTERS:
-        ; Print flag-register letters from (EC3E): bit 7→'S', 6→'Z', 2→'V', 0→'C'
+        ; Print bits of MEGA_USER_FLAGS_SAVE: 7→'S', 6→'Z', 2→'V', 0→'C'
         call    PRINT_SPACE                                    ;#4476: CD ED 43
         ld      a,(MEGA_USER_FLAGS_SAVE)                       ;#4479: 3A 3E EC
         ld      c,a                                            ;#447C: 4F
@@ -1415,11 +1424,38 @@ PRINT_FLAGS_AS_LETTERS:
         ld      a,"C"                                          ;#4494: 3E 43
         call    nz,PRINT_CHAR                                  ;#4496: C4 B6 42
         ret                                                    ;#4499: C9
+
+REGISTER_DUMP_HEADER_MAIN:
+        ; "\r A  F  B  C  D  E  H  L\r" header for R-command register dump
+        ; Format: FORMAT_PLAIN_STRING
+        ; - Bytes are printable ASCII (or CR) followed by a 00 terminator.
         db      0Dh, " A  F  B  C  D  E  H  L", 0Dh            ;#449A: 0D 20 41 20 20 46 20 20 42 20 20 43 20 20 44 20 20 45 20 20 48 20 20 4C 0D
         db      0                                              ;#44B3: 00
+
+REGISTER_DUMP_HEADER_PRIMED:
+        ; " A' F' B' C' D' E' H' L' I" header for the primed register set
+        ; Format: FORMAT_PLAIN_STRING
+        ; - Bytes are printable ASCII (or CR) followed by a 00 terminator.
         db      " A' F' B' C' D' E' H' L' I", 0Dh              ;#44B4: 20 41 27 20 46 27 20 42 27 20 43 27 20 44 27 20 45 27 20 48 27 20 4C 27 20 49 0D
         db      0                                              ;#44CF: 00
-        db      " IX   IY   SP   PC", 0Dh                      ;#44D0: 20 49 58 20 20 20 49 59 20 20 20 53 50 20 20 20 50 43 0D
+
+REGISTER_DUMP_HEADER_IXIY:
+        ; " IX   IY   SP   PC" header for index/stack registers
+        ; Format: FORMAT_RAW_STRING
+        ; - For embedded text that isn't 0-terminated or bit-7-terminated.
+        db      " IX   IY"                                     ;#44D0: 20 49 58 20 20 20 49 59
+
+X_REG_NAME_BASE_HIGH:
+        ; Offset-arithmetic base used by X for IX/IY/SP/PC name lookup (=IXIY+8)
+        ; Format: FORMAT_RAW_STRING
+        ; - For embedded text that isn't 0-terminated or bit-7-terminated.
+        db      "   SP   "                                     ;#44D8: 20 20 20 53 50 20 20 20
+
+X_REG_NAME_BASE_LOW:
+        ; Offset-arithmetic base used by X for 8-bit register name lookup (=IXIY+16)
+        ; Format: FORMAT_PLAIN_STRING
+        ; - Bytes are printable ASCII (or CR) followed by a 00 terminator.
+        db      "PC", 0Dh                                      ;#44E0: 50 43 0D
         db      0                                              ;#44E3: 00
 
 REGISTER_LETTER_TABLE:
@@ -1458,7 +1494,7 @@ X_REG_DISPATCH:
         ld      de,X_REG_NAME_BASE_LOW                         ;#4518: 11 E0 44
         add     hl,hl                                          ;#451B: 29
 X_REG_INDEX_BC:
-        ; Compute HL = name-table offset (C*4 + B) for the chosen register
+        ; HL = BASE - C*3 (8-bit regs) or BASE - C*5 (16-bit); indexes dump-header names
         add     hl,hl                                          ;#451C: 29
         add     hl,bc                                          ;#451D: 09
         ex      de,hl                                          ;#451E: EB
@@ -1559,7 +1595,7 @@ X_REG_INPUT_RP_NONHEX:
         ; 16-bit-edit path: non-hex key — pop saved HL, test for CR/nav
         ex      de,hl                                          ;#459A: EB
         pop     hl                                             ;#459B: E1
-        cp      0Dh                                            ;#459C: FE 0D
+        cp      "\r"                                           ;#459C: FE 0D
         jr      z,X_STORE_AND_PRINT_CR                         ;#459E: 28 0A
         call    MEGA_PCMD_X_NAV_KEY                            ;#45A0: CD B5 45
         jr      c,X_BAD_KEY                                    ;#45A3: 38 C5
@@ -1582,9 +1618,9 @@ X_PRINT_CR_TAIL:
 
 MEGA_PCMD_X_NAV_KEY:
         ; Handle X-command navigation keys: `\` (5Ch) = prev reg, `^` (5Eh) = next reg
-        cp      5Ch                                            ;#45B5: FE 5C
+        cp      "\\"                                           ;#45B5: FE 5C
         jr      z,MEGA_PCMD_X_PREV_REG                         ;#45B7: 28 13
-        cp      5Eh                                            ;#45B9: FE 5E
+        cp      "^"                                            ;#45B9: FE 5E
         scf                                                    ;#45BB: 37
         ret     nz                                             ;#45BC: C0
         inc     c                                              ;#45BD: 0C
@@ -1615,7 +1651,7 @@ X_NAV_PREV_WRAP:
         ; `\` prev path: slot 0 → wrap to 14h
         ld      c,14h                                          ;#45D7: 0E 14
 X_NAV_PREV_DONE:
-        ; Common return: clear CF and ret
+        ; Shared `\` / `^` nav-key return — CF=0 means key was accepted
         or      a                                              ;#45D9: B7
         ret                                                    ;#45DA: C9
 
@@ -1726,7 +1762,7 @@ MEGA_PCMD_G_SYNTAX_ERR:
         jp      SYNTAX_ERROR_LF                                ;#466C: C3 47 43
 
 HOUTD_HOOK:
-        ; Hook installed at BIOS HOUTD (FEE4); checks breakpoints before passthrough
+        ; Hook installed at BIOS_HOUTD; checks breakpoints before passthrough
         ; HOUTD_HOOK — breakpoint interceptor. MEGA installs
         ; `JP HOUTD_HOOK` at BIOS_HOUTD (FEE4h) during boot. When user code
         ; executes a `RST 18h` (opcode DFh), the BIOS routes through HOUTD,
@@ -1806,7 +1842,7 @@ HOUTD_HOOK_SAVE_PV:
         ld      (hl),a                                         ;#46D8: 77
 HOUTD_HOOK_DISARM_BPS:
         ; Write DFh (RST 18 = "no BP") into both BREAKPOINT_*_OPCODE — disarms both BPs
-        ld      a,0DFh                                         ;#46D9: 3E DF
+        ld      a,Z80_RST_18                                   ;#46D9: 3E DF
         ld      (BREAKPOINT_A_OPCODE),a                        ;#46DB: 32 6E EC
         ld      (BREAKPOINT_B_OPCODE),a                        ;#46DE: 32 71 EC
         ld      a,(BIOS_SCRMOD)                                ;#46E1: 3A AF FC
@@ -1835,7 +1871,7 @@ REMAP_KEY_ADD_BIAS:
         ; CPIR hit on row >=A: bias up via `add a,7`; both arms then add "0"
         add     a,"0"                                          ;#470E: C6 30
 REMAP_KEY_RESTORE:
-        ; CPIR-miss path: pop saved BC/HL and jr to common return (4712 → 471A)
+        ; Shared tail (CPIR miss + CPIR hit fallthrough): pop saved BC/HL, jr to echo
         pop     bc                                             ;#4710: C1
         pop     hl                                             ;#4711: E1
         jr      READ_KEY_AS_HEX_ECHO                           ;#4712: 18 06
@@ -1937,7 +1973,7 @@ MEM_EDIT_ADVANCE:
         and     3                                              ;#4780: E6 03
         jr      nz,MEM_EDIT_NEXT_BYTE                          ;#4782: 20 E3
 MEM_EDIT_END_ROW:
-        ; After 4 bytes written, emit CR and jr 4764h to start the next memory row
+        ; After 4 bytes written, emit CR and jr MEM_EDIT_NEW_ROW for the next row
         call    PRINT_CR                                       ;#4784: CD B4 42
         jr      MEM_EDIT_NEW_ROW                               ;#4787: 18 DB
 
@@ -2116,7 +2152,7 @@ MEGA_PCMD_D_PRINT_PLAIN:
         call    PRINT_CHAR_DUAL                                ;#4878: CD C4 42
 MEGA_PCMD_D_PRINT_TAIL:
         ; Shared post-emit CR test for D print loop
-        cp      0Dh                                            ;#487B: FE 0D
+        cp      "\r"                                           ;#487B: FE 0D
         jr      nz,MEGA_PCMD_D_PRINT_LOOP                      ;#487D: 20 E3
         pop     af                                             ;#487F: F1
         jp      nc,MEGA_PCMD_D_ROW_LOOP                        ;#4880: D2 06 48
@@ -2304,7 +2340,7 @@ SEARCH_REPORT_PRINT_LOOP:
         ld      a,(hl)                                         ;#4975: 7E
         inc     hl                                             ;#4976: 23
         call    PRINT_CHAR_DUAL                                ;#4977: CD C4 42
-        cp      0Dh                                            ;#497A: FE 0D
+        cp      "\r"                                           ;#497A: FE 0D
         jr      nz,SEARCH_REPORT_PRINT_LOOP                    ;#497C: 20 F7
         ret                                                    ;#497E: C9
 
@@ -2313,7 +2349,7 @@ SEARCH_REPORT_BUFFERED:
         inc     hl                                             ;#497F: 23
         ld      a,(hl)                                         ;#4980: 7E
         call    MEGA_LIST_APPEND_BYTE                          ;#4981: CD 5E 4A
-        cp      0Dh                                            ;#4984: FE 0D
+        cp      "\r"                                           ;#4984: FE 0D
         jr      nz,SEARCH_REPORT_BUFFERED                      ;#4986: 20 F7
         ret                                                    ;#4988: C9
 
@@ -2468,7 +2504,7 @@ TAPE_FLUSH_PENDING:
         or      a                                              ;#4A7E: B7
         ret     z                                              ;#4A7F: C8
 TAPE_FLUSH_LIST_BUF:
-        ; Emit MEGA_LIST_BUF (256 bytes at EE16h) to cassette with the 1Eh×18h+9Ch header
+        ; Emit 256-byte MEGA_LIST_BUF to cassette with the 1Eh×18h+9Ch sync header
         call    CASSETTE_TAPOON_AF                             ;#4A80: CD DD 42
         ld      b,1Eh                                          ;#4A83: 06 1E
         ld      a,18h                                          ;#4A85: 3E 18
@@ -2588,7 +2624,7 @@ PRINT_CR_STRING:
         ld      a,(hl)                                         ;#4B3C: 7E
         inc     hl                                             ;#4B3D: 23
         call    PRINT_CHAR                                     ;#4B3E: CD B6 42
-        cp      0Dh                                            ;#4B41: FE 0D
+        cp      "\r"                                           ;#4B41: FE 0D
         jr      nz,PRINT_CR_STRING                             ;#4B43: 20 F7
         ret                                                    ;#4B45: C9
 
@@ -2610,7 +2646,7 @@ MATCH_TAPE_FILENAME_END:
         ret                                                    ;#4B56: C9
 
 INIT_TAPE_FILENAME:
-        ; Fill 16-byte filename buffer at EE16h with spaces, then write CR at byte 16
+        ; Fill 16-byte filename buffer at MEGA_LIST_BUF with spaces, then CR at byte 16
         ld      de,MEGA_LIST_BUF                               ;#4B57: 11 16 EE
         ld      b,10h                                          ;#4B5A: 06 10
         ld      a," "                                          ;#4B5C: 3E 20
@@ -2680,7 +2716,7 @@ INPUT_LINE_READ_LOOP:
         call    TAPE_BUF_GET_BYTE                              ;#4B9E: CD BC 4B
         cp      1Ah                                            ;#4BA1: FE 1A
         jr      z,INPUT_LINE_EOF                               ;#4BA3: 28 10
-        cp      0Dh                                            ;#4BA5: FE 0D
+        cp      "\r"                                           ;#4BA5: FE 0D
         jr      z,INPUT_LINE_CR                                ;#4BA7: 28 09
         inc     b                                              ;#4BA9: 04
         dec     b                                              ;#4BAA: 05
@@ -3810,7 +3846,7 @@ ASSEMBLE_PASS1_DONE:
         jr      ASSEMBLE_PASS2_ENTRY                           ;#51B3: 18 0A
 
 ASSEMBLE_ABORT:
-        ; Cleanup-and-restart: print CR, restore SP from EC66h, jp to prompt
+        ; Cleanup-and-restart: print CR, restore SP from MEGA_SAVED_SP_ASM, jp to prompt
         call    PRINT_CR                                       ;#51B5: CD B4 42
         ld      sp,(MEGA_SAVED_SP_ASM)                         ;#51B8: ED 7B 66 EC
         jp      MEGA_PROMPT_TICK                               ;#51BC: C3 19 41
@@ -3849,7 +3885,7 @@ ASSEMBLE_PASS2_DONE:
         endr
 
 ASSEMBLE_FINALIZE:
-        ; Post-pass cleanup; emit deferred labels via 53EAh; jump to ASSEMBLE_ABORT
+        ; Post-pass cleanup; emit deferred labels; jp ASSEMBLE_ABORT
         call    TAPE_WRITE_EOF                                 ;#5205: CD F1 55
         bit     7,(ix)                                         ;#5208: DD CB 00 7E
         jr      z,ASSEMBLE_FIN_BIT6                            ;#520C: 28 09
@@ -4112,7 +4148,7 @@ DISASM_PRINT_LINE_LOOP:
         ld      a,(hl)                                         ;#539D: 7E
         call    PRINT_CHAR_DUAL                                ;#539E: CD C4 42
         inc     hl                                             ;#53A1: 23
-        cp      0Dh                                            ;#53A2: FE 0D
+        cp      "\r"                                           ;#53A2: FE 0D
         jr      nz,DISASM_PRINT_LINE_LOOP                      ;#53A4: 20 F7
         bit     1,(ix)                                         ;#53A6: DD CB 00 4E
         ret     z                                              ;#53AA: C8
@@ -4346,7 +4382,7 @@ ASM_FIND_LABEL_NAME_END:
         jr      ASM_FIND_LABEL_RECORD                          ;#54E9: 18 DB
 
 ASM_FIND_LABEL_DONE:
-        ; Bare `ret` — shared tail; CF=1 on match (scf at 54D0), CF=0 on EOT
+        ; Bare `ret` — shared tail; CF=1 = match (SCF inside SCAN), CF=0 = EOT
         ret                                                    ;#54EB: C9
 
 ASM_CLEAR_SYMBOL_REFS:
@@ -4683,7 +4719,7 @@ ASM_LIST_COMMENT_ONLY:
         ; Line was just `;`-comment — short-circuit straight to listing emit
         ld      hl,MEGA_LIST_LABEL_COL                         ;#56D3: 21 DA EC
 ASM_LIST_COPY_LABEL_INIT:
-        ; Init BC=ED12h bound before ASM_LIST_LABEL_BODY copy
+        ; Init BC=MEGA_LIST_LABEL_END before ASM_LIST_LABEL_BODY copy
         ld      bc,MEGA_LIST_LABEL_END                         ;#56D6: 01 12 ED
         ld      a,(MEGA_LIST_FROM_OFFSET)                      ;#56D9: 3A 6B EC
         or      a                                              ;#56DC: B7
@@ -4979,17 +5015,17 @@ ASM_EMIT_OPCODE_TAIL:
         ret                                                    ;#585E: C9
 
 ASM_EMIT_OPC_8BIT:
-        ; Emit opcode B then 8-bit operand (EC51) — `op nn` encoder
+        ; Emit opcode B then 8-bit operand (MEGA_ASM_OPERAND_VAL) — `op nn` encoder
         call    ASM_EMIT_OPCODE                                ;#585F: CD 54 58
         jr      ASM_EMIT_EC51                                  ;#5862: 18 13
 
 ASM_EMIT_OPC_16BIT:
-        ; Emit opcode B then 16-bit operand (EC51, EC52) — `op nnnn` encoder
+        ; Emit opcode B then 16-bit operand from MEGA_ASM_OPERAND_VAL — `op nnnn` encoder
         call    ASM_EMIT_OPCODE                                ;#5864: CD 54 58
         jr      ASM_EMIT_OP_16BIT_TAIL                         ;#5867: 18 22
 
 ASM_EMIT_IXY_DISP:
-        ; If EC55 bit 2 set, emit IXY displacement byte (EC53); else no-op
+        ; If MEGA_ASM_OPC_FLAGS bit 2 set, emit MEGA_ASM_IXY_DISP byte; else no-op
         call    ASM_EMIT_OPC_IXY                               ;#5869: CD 41 58
         bit     2,c                                            ;#586C: CB 51
         ret     z                                              ;#586E: C8
@@ -5000,29 +5036,29 @@ ASM_EMIT_IXY_OPC_8BIT:
         ; Combo: emit IXY displacement (if any), then opcode B, then EC51
         call    ASM_EMIT_IXY_DISP                              ;#5874: CD 69 58
 ASM_EMIT_EC51:
-        ; Emit low byte of (EC51) via ASM_EMIT_BYTE — common operand-byte tail
+        ; Emit low byte of MEGA_ASM_OPERAND_VAL via ASM_EMIT_BYTE (common tail)
         ld      a,(MEGA_ASM_OPERAND_VAL)                       ;#5877: 3A 51 EC
         jr      ASM_EMIT_BYTE                                  ;#587A: 18 15
 
 ASM_EMIT_IXY_OPC_16BIT:
-        ; Combo: DD/FD prefix, opcode B, then 16-bit operand (EC51/EC52)
+        ; Combo: DD/FD prefix, opcode B, then 16-bit operand from MEGA_ASM_OPERAND_VAL
         call    ASM_EMIT_OPC_IXY                               ;#587C: CD 41 58
         jr      ASM_EMIT_OP_16BIT_TAIL                         ;#587F: 18 0A
 
 ASM_EMIT_ED_OPCODE:
-        ; Emit `ED` (ED prefix) then opcode in B
+        ; Emit ED prefix byte then opcode in B
         ld      a,Z80_ED_PREFIX                                ;#5881: 3E ED
         call    ASM_EMIT_BYTE                                  ;#5883: CD 91 58
         jr      ASM_EMIT_OPCODE                                ;#5886: 18 CC
 
 ASM_EMIT_ED_16BIT:
-        ; Emit `ED` prefix, opcode B, then 16-bit operand (EC51/EC52)
+        ; Emit `ED` prefix, opcode B, then 16-bit operand from MEGA_ASM_OPERAND_VAL
         call    ASM_EMIT_ED_OPCODE                             ;#5888: CD 81 58
 ASM_EMIT_OP_16BIT_TAIL:
         ; Common 16-bit-operand tail: emit EC51 (low) then EC52 (high) via ASM_EMIT_BYTE
         call    ASM_EMIT_EC51                                  ;#588B: CD 77 58
 ASM_EMIT_OP_16BIT_HI:
-        ; Load high byte (EC52) into A
+        ; Load high byte of MEGA_ASM_OPERAND_VAL into A
         ld      a,(MEGA_ASM_OPERAND_VAL_HI)                    ;#588E: 3A 52 EC
 ASM_EMIT_BYTE:
         ; Assembler byte emitter: store A at MEGA_DISASM_CURSOR (PASS-2 gated), advance iy
@@ -5305,7 +5341,7 @@ ASM_LD_R_PATH:
         jp      ASM_EMIT_IXY_OPC_16BIT                         ;#59F4: C3 7C 58
 
 ASM_LD_SP_IXY:
-        ; `ld sp,ix/iy` arm — verify operand E=F0h, emit F9h via EMIT_OPC_IXY
+        ; `ld sp,hl/ix/iy` arm — src HL-class (mask F9h→E0h), dest E=SP (F0h), emit F9h
         and     0F9h                                           ;#59F7: E6 F9
         cp      ID_ARGUMENT_HL                                 ;#59F9: FE E0
         ret     nz                                             ;#59FB: C0
@@ -5349,7 +5385,7 @@ ASM_EMIT_OP_CALL:
         dec     l                                              ;#5A2B: 2D
         ret     nz                                             ;#5A2C: C0
 ASM_CALL_CHECK_NUM:
-        ; CALL nn arm — verify operand is numeric (L = '0' marker), emit 16-bit
+        ; CALL nn arm — require operand A=ID_ARGUMENT_LITERAL (numeric), emit 16-bit opc
         cp      ID_ARGUMENT_LITERAL                            ;#5A2D: FE 30
         ret     nz                                             ;#5A2F: C0
         jp      ASM_EMIT_OPC_16BIT                             ;#5A30: C3 64 58
@@ -5400,7 +5436,7 @@ ASM_EMIT_OP_DJNZ:
         dec     l                                              ;#5A66: 2D
         ret     nz                                             ;#5A67: C0
 ASM_EMIT_REL_CHECK_ZERO:
-        ; Shared rel-jump finalize — cp '0', compute disp via OPERAND_VAL
+        ; Rel-jump finalize: require A=ID_ARGUMENT_LITERAL, disp = VAL - INSTR_START - 2
         cp      ID_ARGUMENT_LITERAL                            ;#5A68: FE 30
         ret     nz                                             ;#5A6A: C0
         ld      hl,(MEGA_ASM_OPERAND_VAL)                      ;#5A6B: 2A 51 EC
@@ -5415,7 +5451,7 @@ ASM_EMIT_REL_CHECK_ZERO:
         jp      ASM_EMIT_OPC_8BIT                              ;#5A80: C3 5F 58
 
 ASM_CHECK_SIGNED_BYTE:
-        ; Sign-extend (EC51) into 16 bits; Z=1 if fits in signed byte (-128..127), A=L
+        ; Sign-extend MEGA_ASM_OPERAND_VAL; Z=1 if fits signed byte (-128..127), A=L
         push    hl                                             ;#5A83: E5
         ld      hl,(MEGA_ASM_OPERAND_VAL)                      ;#5A84: 2A 51 EC
         bit     7,l                                            ;#5A87: CB 7D
@@ -5645,7 +5681,7 @@ ASM_ERROR_SET_BIT4:
         ; Set bit 4 of (ix+2) and fall into ASM_ERROR_CLEANUP
         set     4,(ix+2)                                       ;#5BA9: DD CB 02 E6
 ASM_ERROR_CLEANUP:
-        ; Shared tail of the error-flag setters (5B97/5B9D/5BA3/5BA9) — zero EC51, ret
+        ; Shared tail of ASM_ERROR_SET_BIT0/1/2/4 — zero MEGA_ASM_OPERAND_VAL, ret
         push    hl                                             ;#5BAD: E5
         ld      hl,0                                           ;#5BAE: 21 00 00
         ld      (MEGA_ASM_OPERAND_VAL),hl                      ;#5BB1: 22 51 EC
@@ -5875,7 +5911,7 @@ RESOLVE_LABEL_WALK_REFS:
         ret                                                    ;#5D02: C9
 
 LOOKUP_LABEL:
-        ; Walk the assembler symbol table at (EC49); CF=1 + HL/DE on match, CF=0 not found
+        ; Walk symbol table at MEGA_SYM_TABLE_BASE; CF=1 + HL/DE on match, CF=0 not found
         ld      hl,(MEGA_SYM_TABLE_BASE)                       ;#5D03: 2A 49 EC
         ld      b,0                                            ;#5D06: 06 00
         jr      LOOKUP_LABEL_READ                              ;#5D08: 18 04
@@ -5909,7 +5945,7 @@ LOOKUP_LABEL_MATCH_LOOP:
         jr      nz,LOOKUP_LABEL_MATCH_LOOP                     ;#5D28: 20 EF
         scf                                                    ;#5D2A: 37
 LOOKUP_LABEL_RET:
-        ; Shared `ret` — reached with CF=1 on match (scf at 5D2A) or CF=0 on EOT
+        ; Shared `ret` — reached with CF=1 on match (SCF in LOOKUP_LABEL) or CF=0 on EOT
         ret                                                    ;#5D2B: C9
 
 ASM_PARSE_OPERANDS:
@@ -5937,13 +5973,13 @@ ASM_PARSE_OPERAND2:
         call    ASM_CHECK_EOL_OR_COMMENT                       ;#5D49: CD 7D 5D
         push    af                                             ;#5D4C: F5
         ld      a,c                                            ;#5D4D: 79
-        cp      0F8h                                           ;#5D4E: FE F8
+        cp      ID_ARGUMENT_AF                                 ;#5D4E: FE F8
         jr      z,ASM_OPERAND2_QUOTE                           ;#5D50: 28 0F
         pop     af                                             ;#5D52: F1
         jr      nz,ASM_OPERANDS_RAISE_ERR                      ;#5D53: 20 25
         ld      a,c                                            ;#5D55: 79
         and     0FEh                                           ;#5D56: E6 FE
-        cp      30h                                            ;#5D58: FE 30
+        cp      ID_ARGUMENT_LITERAL                            ;#5D58: FE 30
         pop     hl                                             ;#5D5A: E1
         pop     de                                             ;#5D5B: D1
         ret     z                                              ;#5D5C: C8
@@ -6032,7 +6068,7 @@ ASM_PARSE_OPERAND_CLOSE_PAREN:
         inc     c                                              ;#5DCE: 0C
         ld      a,c                                            ;#5DCF: 79
         and     0F9h                                           ;#5DD0: E6 F9
-        cp      0E1h                                           ;#5DD2: FE E1
+        cp      ID_ARGUMENT_HL+1                               ;#5DD2: FE E1
         ret     nz                                             ;#5DD4: C0
         and     6                                              ;#5DD5: E6 06
         or      0B0h                                           ;#5DD7: F6 B0
@@ -6628,12 +6664,12 @@ PRINT_DISASM_LINE_SIMPLE_LOOP:
         ld      a,(hl)                                         ;#61C8: 7E
         call    PRINT_CHAR_DUAL                                ;#61C9: CD C4 42
         inc     hl                                             ;#61CC: 23
-        cp      0Dh                                            ;#61CD: FE 0D
+        cp      "\r"                                           ;#61CD: FE 0D
         jr      nz,PRINT_DISASM_LINE_SIMPLE_LOOP               ;#61CF: 20 F7
         ret                                                    ;#61D1: C9
 
 DISASM_INIT_INSTRUCTION_STATE:
-        ; Reset per-instruction scratch (EC55/EC47/EC57) and clear output line
+        ; Reset per-instruction scratch (OPC_FLAGS/MATCH_FLAG/OPCODE) + clear out-line
         xor     a                                              ;#61D2: AF
         ld      (MEGA_ASM_OPC_FLAGS),a                         ;#61D3: 32 55 EC
         ld      (DISASM_SPECIAL_MATCH_FLAG),a                  ;#61D6: 32 47 EC
@@ -6780,14 +6816,14 @@ DISASM_EMIT_OPERANDS:
         ld      d,","                                          ;#62C0: 16 2C
         call    DISASM_EMIT_D                                  ;#62C2: CD 2B 64
 DISASM_DISPATCH_OP_FN:
-        ; Computed jump into the per-operand OP_* handler at offset A in the table
+        ; Jump OP_* handler at A; split table via OP_NN-pivot (A<38h→64xx)
         ld      hl,OP_NN                                       ;#62C5: 21 38 63
         cp      l                                              ;#62C8: BD
         ld      l,a                                            ;#62C9: 6F
         jr      nc,DISASM_DISPATCH_NO_CARRY                    ;#62CA: 30 01
         inc     h                                              ;#62CC: 24
 DISASM_DISPATCH_NO_CARRY:
-        ; Address-table offset >=L — increment H before jp (hl)
+        ; A>=OP_NN.lo (no H bump): bit-shift C for operand subfield, jp (hl)
         ld      a,c                                            ;#62CD: 79
         rra                                                    ;#62CE: 1F
         rra                                                    ;#62CF: 1F
@@ -7062,7 +7098,7 @@ OP_JR_TARGET:
         jr      z,OP_JR_TARGET_EMIT                            ;#63DF: 28 01
         dec     a                                              ;#63E1: 3D
 OP_JR_TARGET_EMIT:
-        ; After sign-extension: jp into OP_NNNN's mid-emit (DISASM_EMIT_HEX_BYTE at 6344)
+        ; After sign-extension: jp into OP_NNNN's mid-emit at OP_NNNN_EMIT_LOW
         jp      OP_NNNN_EMIT_LOW                               ;#63E2: C3 44 63
 
 OP_R_LOW:
@@ -7379,9 +7415,6 @@ DISASM_TABLE_CB:
         db      "SRA"C                                         ;#661D: 53 52 C1
         DISASM mask=0F8h, op=Z80_SRL_BASE, type=ID_R_LOW       ;#6620: F8 38 01
         db      "SRL"C                                         ;#6623: 53 52 CC
-
-DISASM_CB_END:
-        ; CB-table terminator byte (00)
         db      0                                              ;#6626: 00
 
 DISASM_TABLE_ED:
@@ -7658,6 +7691,10 @@ SPRITE_SCAN_LOOP:
         call    BIOS_CALATR                                    ;#67C3: CD 87 00
         ld      d,a                                            ;#67C6: 57
         call    BIOS_RDVRM                                     ;#67C7: CD 4A 00
+        ; D0h here is the VDP "sprite Y = end-of-list" sentinel — when the
+        ; sprite-attribute Y-coord field reads D0h, sprite scanning stops for
+        ; the rest of the line. NOT related to ID_HEADER_BINARY (same hex
+        ; value, different protocol).
         cp      0D0h                                           ;#67CA: FE D0
         ret     z                                              ;#67CC: C8
         push    de                                             ;#67CD: D5
@@ -7808,7 +7845,7 @@ OVERLAY_BIT_PLACE:
         pop     de                                             ;#6884: D1
         pop     bc                                             ;#6885: C1
 OVERLAY_BIT_NEXT:
-        ; Advance to next bit/column — inc iy, inc E, dec L, loop if more
+        ; Step to next column: bump glyph pointer + bit index, dec col-counter, loop
         inc     iy                                             ;#6886: FD 23
         inc     e                                              ;#6888: 1C
         dec     l                                              ;#6889: 2D
@@ -7834,7 +7871,7 @@ CHECK_GREY_MODE:
         ret                                                    ;#68A1: C9
 
 DUMP_BIT_REORDER_TABLE:
-        ; 14-byte bit-pattern lookup indexed by DUMP grey-mode pixel routine (7F12)
+        ; 14-byte bit-pattern lookup indexed by DUMP_EMIT_ROW_LOOP's grey-mode arm
         ; Format: FORMAT_BIT_LOOKUP_TABLE
         ; - Each byte is a pre-computed bit pattern selected via `add hl,bc; ld a,(hl)`
         ; - by routines that need a small constant table (printer-pin maps, character
@@ -8051,7 +8088,7 @@ PROBE_SUBSLOT_RDWR:
         ld      a,c                                            ;#69D6: 79
         jr      nz,PROBE_SUBSLOT_PROBE                         ;#69D7: 20 C8
 PROBE_SUBSLOT_MATCH:
-        ; Slot probe matched (H=40h) — A=C and pop, ret with cart slot in A
+        ; Slot probe exit (H=40h match or H=80h fallthrough) — A=C, pop x2, ret
         ld      a,c                                            ;#69D9: 79
         pop     hl                                             ;#69DA: E1
         pop     hl                                             ;#69DB: E1
@@ -8475,14 +8512,14 @@ MEGA_PCMD_PAGE:
         rlca                                                   ;#6CCB: 07
         and     0Fh                                            ;#6CCC: E6 0F
         or      c                                              ;#6CCE: B1
-        ld      (MEGA_HOOK_SLOT_PATCH),a                       ;#6CCF: 32 03 FA
+        ld      (MEGA_SLOT_ENTER_PATCH),a                      ;#6CCF: 32 03 FA
         ret                                                    ;#6CD2: C9
 
 PAGE_PRINT_REPORT:
         ; "?" argument path: print "Pagina N = Slot M" for each of the 4 pages
         cp      "?"                                            ;#6CD3: FE 3F
         jr      nz,MEGA_PCMD_PAGE_PARSE_SET                    ;#6CD5: 20 33
-        ld      a,(MEGA_HOOK_SLOT_PATCH)                       ;#6CD7: 3A 03 FA
+        ld      a,(MEGA_SLOT_ENTER_PATCH)                      ;#6CD7: 3A 03 FA
         ld      b,4                                            ;#6CDA: 06 04
         ld      c,a                                            ;#6CDC: 4F
 PAGE_PRINT_LOOP:
@@ -8509,8 +8546,8 @@ PAGE_PRINT_LOOP:
         ret                                                    ;#6D09: C9
 
 MEGA_PCMD_PAGE_PARSE_SET:
-        ; Non-? form: parse up to 4 decimal slot digits, pack into MEGA_HOOK_SLOT_PATCH
-        ld      a,(MEGA_HOOK_SLOT_PATCH)                       ;#6D0A: 3A 03 FA
+        ; Non-? form: parse up to 4 decimal slot digits, pack into MEGA_SLOT_ENTER_PATCH
+        ld      a,(MEGA_SLOT_ENTER_PATCH)                      ;#6D0A: 3A 03 FA
         ld      c,a                                            ;#6D0D: 4F
         ld      b,4                                            ;#6D0E: 06 04
         dec     hl                                             ;#6D10: 2B
@@ -8553,7 +8590,7 @@ PAGE_PARSE_COMMIT:
         in      a,(0A8h)                                       ;#6D3F: DB A8
         and     0C0h                                           ;#6D41: E6 C0
         or      c                                              ;#6D43: B1
-        ld      (MEGA_HOOK_SLOT_PATCH),a                       ;#6D44: 32 03 FA
+        ld      (MEGA_SLOT_ENTER_PATCH),a                      ;#6D44: 32 03 FA
         ret                                                    ;#6D47: C9
 
 PAGE_PARSE_NO_DIGIT:
@@ -8562,7 +8599,7 @@ PAGE_PARSE_NO_DIGIT:
         jr      PAGE_PARSE_ROTATE                              ;#6D49: 18 EB
 
 PAGE_PARSE_NO_ARGS:
-        ; No-arg form — rotate existing MEGA_HOOK_SLOT_PATCH into low bits
+        ; No-arg form — rotate existing MEGA_SLOT_ENTER_PATCH into low bits
         ld      a,c                                            ;#6D4B: 79
 PAGE_PARSE_ROTATE_LOOP:
         ; Per-iteration rrca pair body of the no-arg `PAGE ?` rotate path
@@ -8681,11 +8718,11 @@ EDITOR_KEY_WAIT:
         ld      (BIOS_GRPACY),hl                               ;#6E21: 22 B9 FC
         ld      hl,18h                                         ;#6E24: 21 18 00
         ld      (BIOS_GRPACX),hl                               ;#6E27: 22 B7 FC
-        ld      a,45h                                          ;#6E2A: 3E 45
+        ld      a,"E"                                          ;#6E2A: 3E 45
         call    BIOS_GRPPRT                                    ;#6E2C: CD 8D 00
-        ld      a,6Eh                                          ;#6E2F: 3E 6E
+        ld      a,"n"                                          ;#6E2F: 3E 6E
         call    BIOS_GRPPRT                                    ;#6E31: CD 8D 00
-        ld      a,64h                                          ;#6E34: 3E 64
+        ld      a,"d"                                          ;#6E34: 3E 64
         call    BIOS_GRPPRT                                    ;#6E36: CD 8D 00
         ld      a,":"                                          ;#6E39: 3E 3A
         call    BIOS_GRPPRT                                    ;#6E3B: CD 8D 00
@@ -8753,7 +8790,7 @@ EDITOR_KEY_DISPATCH:
 
 EDITOR_KEY_ESC:
         ; ESC (1Bh): toggle the colour-attribute byte at sprite slot 0 between D0h/05h
-        cp      1Bh                                            ;#6E92: FE 1B
+        cp      CHAR_ESC                                       ;#6E92: FE 1B
         jr      nz,EDITOR_KEY_CURSOR                           ;#6E94: 20 15
         xor     a                                              ;#6E96: AF
         call    BIOS_CALATR                                    ;#6E97: CD 87 00
@@ -8768,7 +8805,7 @@ EDITOR_KEY_ESC_WRITE:
         jp      EDITOR_KEY_WAIT                                ;#6EA8: C3 11 6E
 
 EDITOR_KEY_CURSOR:
-        ; Cursor-key arm (1Ch-1Fh): compute row*8 offset, dispatch on direction
+        ; Cursor-key arm (CHAR_CURSOR_*): compute row*8 offset, dispatch on direction
         ld      de,(MEGA_SCRATCH_W2)                           ;#6EAB: ED 5B 32 FA
         ld      b,d                                            ;#6EAF: 42
         ld      hl,0                                           ;#6EB0: 21 00 00
@@ -8782,29 +8819,29 @@ EDITOR_CURSOR_ROWMUL_LOOP:
         add     hl,hl                                          ;#6EB9: 29
         ex      de,hl                                          ;#6EBA: EB
         ld      hl,(MEGA_HEADER_TYPE)                          ;#6EBB: 2A 30 FA
-        cp      1Ch                                            ;#6EBE: FE 1C
-        jr      nz,CURSOR_TEST_RIGHT                           ;#6EC0: 20 01
+        cp      CHAR_CURSOR_RIGHT                              ;#6EBE: FE 1C
+        jr      nz,CURSOR_TEST_LEFT                            ;#6EC0: 20 01
         inc     hl                                             ;#6EC2: 23
-CURSOR_TEST_RIGHT:
-        ; Test for 1Dh (right) — dec HL if matched
-        cp      1Dh                                            ;#6EC3: FE 1D
+CURSOR_TEST_LEFT:
+        ; Test for CHAR_CURSOR_LEFT (1Dh) — dec HL (one column back) if matched
+        cp      CHAR_CURSOR_LEFT                               ;#6EC3: FE 1D
         jr      nz,CURSOR_TEST_UP                              ;#6EC5: 20 01
         dec     hl                                             ;#6EC7: 2B
 CURSOR_TEST_UP:
-        ; Test for 1Eh (up) — `sbc hl,de` (back one row) if matched
-        cp      1Eh                                            ;#6EC8: FE 1E
+        ; Test for CHAR_CURSOR_UP (1Eh) — `sbc hl,de` (back one row) if matched
+        cp      CHAR_CURSOR_UP                                 ;#6EC8: FE 1E
         jr      nz,CURSOR_TEST_DOWN                            ;#6ECA: 20 03
         and     a                                              ;#6ECC: A7
         sbc     hl,de                                          ;#6ECD: ED 52
 CURSOR_TEST_DOWN:
-        ; Test for 1Fh (down) — `add hl,de` (forward one row) if matched
-        cp      1Fh                                            ;#6ECF: FE 1F
+        ; Test for CHAR_CURSOR_DOWN (1Fh) — `add hl,de` (forward one row) if matched
+        cp      CHAR_CURSOR_DOWN                               ;#6ECF: FE 1F
         jr      nz,CURSOR_COMMIT                               ;#6ED1: 20 01
         add     hl,de                                          ;#6ED3: 19
 CURSOR_COMMIT:
         ; Common commit — store new HL into MEGA_HEADER_TYPE (cursor pos)
         ld      (MEGA_HEADER_TYPE),hl                          ;#6ED4: 22 30 FA
-        cp      0Dh                                            ;#6ED7: FE 0D
+        cp      "\r"                                           ;#6ED7: FE 0D
         jp      nz,EDITOR_KEY_LOOP                             ;#6ED9: C2 0E 6E
         ld      a,(MEGA_EDITOR_MODE_FLAGS)                     ;#6EDC: 3A 36 FA
         bit     5,a                                            ;#6EDF: CB 6F
@@ -9063,7 +9100,7 @@ EDITOR_DRAW_BLIT_CALL:
         add     a,8                                            ;#7090: C6 08
         jr      nc,EDITOR_DRAW_CELL                            ;#7092: 30 D2
 EDITOR_DRAW_NEXT_ROW:
-        ; Row overflow: pop saved HL, advance V by (FA35), wrap if past row 23
+        ; Row overflow: pop saved HL, advance V by MEGA_SCRATCH_W3_HI, wrap if past row 23
         pop     hl                                             ;#7094: E1
         ld      a,(MEGA_SCRATCH_W3_HI)                         ;#7095: 3A 35 FA
         push    af                                             ;#7098: F5
@@ -9244,7 +9281,7 @@ TOGGLE_CURSOR_COLOR_LOOP:
         ret                                                    ;#7186: C9
 
 WRITE_VDP_DATA_PORT:
-        ; `out (98h),a / nop / nop / ret` — write byte to VDP data port with timing pad
+        ; Send A to VDP data port; trailing NOPs satisfy V9938 write-recovery delay
         out     (98h),a                                        ;#7187: D3 98
         nop                                                    ;#7189: 00
         nop                                                    ;#718A: 00
@@ -9348,7 +9385,7 @@ EDITOR_KEY_INPUT_NOREV:
         call    BIOS_CHGET                                     ;#7241: CD 9F 00
         ld      hl,MEGA_EDITOR_CURSOR_POS                      ;#7244: 21 39 FA
         ld      c,(hl)                                         ;#7247: 4E
-        cp      1Ch                                            ;#7248: FE 1C
+        cp      CHAR_CURSOR_RIGHT                              ;#7248: FE 1C
         jr      c,EDITOR_KEY_NOREV_NORM                        ;#724A: 38 04
         cp      " "                                            ;#724C: FE 20
         jr      c,EDITOR_KEY_NOREV_CURSOR                      ;#724E: 38 28
@@ -9368,30 +9405,30 @@ EDITOR_KEY_NOREV_CTRL:
         jp      z,POP_AND_RETURN_NC                            ;#7264: CA 8B 73
         cp      3                                              ;#7267: FE 03
         jp      z,POP_AND_RETURN_NC                            ;#7269: CA 8B 73
-        cp      0Dh                                            ;#726C: FE 0D
+        cp      "\r"                                           ;#726C: FE 0D
         call    z,EDITOR_KEY_INPUT                             ;#726E: CC A2 72
         cp      3                                              ;#7271: FE 03
         jp      z,POP_AND_RETURN_NC                            ;#7273: CA 8B 73
         jr      EDITOR_KEY_INPUT_NOREV                         ;#7276: 18 C5
 
 EDITOR_KEY_NOREV_CURSOR:
-        ; Cursor-key arm: 1C/1D/1E/1F → C=+1/-1/-16/+16 offsets
-        cp      1Ch                                            ;#7278: FE 1C
-        jr      nz,EDITOR_KEY_NOREV_RIGHT                      ;#727A: 20 02
+        ; Cursor-key arm: CHAR_CURSOR_* → C=+1/-1/-16/+16 offsets
+        cp      CHAR_CURSOR_RIGHT                              ;#7278: FE 1C
+        jr      nz,EDITOR_KEY_NOREV_LEFT                       ;#727A: 20 02
         ld      c,1                                            ;#727C: 0E 01
-EDITOR_KEY_NOREV_RIGHT:
-        ; 1Dh (right) — C=FFh (-1 wrap)
-        cp      1Dh                                            ;#727E: FE 1D
+EDITOR_KEY_NOREV_LEFT:
+        ; CHAR_CURSOR_LEFT (1Dh) — C=FFh (-1 wrap, one column back)
+        cp      CHAR_CURSOR_LEFT                               ;#727E: FE 1D
         jr      nz,EDITOR_KEY_NOREV_UP                         ;#7280: 20 02
         ld      c,0FFh                                         ;#7282: 0E FF
 EDITOR_KEY_NOREV_UP:
-        ; 1Eh (up) — C=F0h (-16)
-        cp      1Eh                                            ;#7284: FE 1E
+        ; CHAR_CURSOR_UP (1Eh) — C=F0h (-16, one row up)
+        cp      CHAR_CURSOR_UP                                 ;#7284: FE 1E
         jr      nz,EDITOR_KEY_NOREV_DOWN                       ;#7286: 20 02
         ld      c,0F0h                                         ;#7288: 0E F0
 EDITOR_KEY_NOREV_DOWN:
-        ; 1Fh (down) — C=10h (+16)
-        cp      1Fh                                            ;#728A: FE 1F
+        ; CHAR_CURSOR_DOWN (1Fh) — C=10h (+16, one row down)
+        cp      CHAR_CURSOR_DOWN                               ;#728A: FE 1F
         jr      nz,EDITOR_KEY_NOREV_APPLY                      ;#728C: 20 02
         ld      c,10h                                          ;#728E: 0E 10
 EDITOR_KEY_NOREV_APPLY:
@@ -9420,7 +9457,7 @@ EDITOR_KEY_INPUT:
 EDITOR_KEY_INPUT_DECIDE:
         ; After invert + CHGET — pop key, test for CR/CTRL-C/space
         pop     af                                             ;#72B7: F1
-        cp      0Dh                                            ;#72B8: FE 0D
+        cp      "\r"                                           ;#72B8: FE 0D
         ret     z                                              ;#72BA: C8
         cp      3                                              ;#72BB: FE 03
         ret     z                                              ;#72BD: C8
@@ -9446,7 +9483,7 @@ EDITOR_KEY_INPUT_PIXEL:
         ld      b,a                                            ;#72DE: 47
         ld      a,80h                                          ;#72DF: 3E 80
 EDITOR_KEY_PIXEL_RLCA_LOOP:
-        ; rlca A B times to align bit mask for pixel toggle
+        ; Rotate 80h left B=(8-col) times, ending with one bit set at the target column
         rlca                                                   ;#72E1: 07
         djnz    EDITOR_KEY_PIXEL_RLCA_LOOP                     ;#72E2: 10 FD
         xor     (hl)                                           ;#72E4: AE
@@ -9487,29 +9524,29 @@ EDITOR_CMD_SHIFT:
         call    EDITOR_MODE_TEST_LO                            ;#7308: CD 84 73
         jr      nz,EDITOR_AFTER_KEY                            ;#730B: 20 3F
         call    BIOS_CHGET                                     ;#730D: CD 9F 00
-        cp      1Ch                                            ;#7310: FE 1C
-        jr      nz,EDITOR_SHIFT_RIGHT                          ;#7312: 20 07
-EDITOR_SHIFT_LEFT_LOOP:
-        ; rrc (hl) over 8 row bytes (left-arrow shift)
+        cp      CHAR_CURSOR_RIGHT                              ;#7310: FE 1C
+        jr      nz,EDITOR_SHIFT_TEST_LEFT                      ;#7312: 20 07
+EDITOR_SHIFT_RIGHT_LOOP:
+        ; CHAR_CURSOR_RIGHT body: `rrc (hl)` per byte = pixels shift right visually
         rrc     (hl)                                           ;#7314: CB 0E
         inc     hl                                             ;#7316: 23
-        djnz    EDITOR_SHIFT_LEFT_LOOP                         ;#7317: 10 FB
+        djnz    EDITOR_SHIFT_RIGHT_LOOP                        ;#7317: 10 FB
         jr      EDITOR_AFTER_KEY                               ;#7319: 18 31
 
-EDITOR_SHIFT_RIGHT:
-        ; 1Dh arm — rlc each row byte (left shift, wrap into high bit)
-        cp      1Dh                                            ;#731B: FE 1D
+EDITOR_SHIFT_TEST_LEFT:
+        ; Test for CHAR_CURSOR_LEFT (1Dh) — falls into LEFT body, else jumps UP
+        cp      CHAR_CURSOR_LEFT                               ;#731B: FE 1D
         jr      nz,EDITOR_SHIFT_UP                             ;#731D: 20 07
-EDITOR_SHIFT_RIGHT_LOOP:
-        ; rlc (hl) over 8 row bytes (right-arrow shift)
+EDITOR_SHIFT_LEFT_LOOP:
+        ; CHAR_CURSOR_LEFT body: `rlc (hl)` per byte = pixels shift left visually
         rlc     (hl)                                           ;#731F: CB 06
         inc     hl                                             ;#7321: 23
-        djnz    EDITOR_SHIFT_RIGHT_LOOP                        ;#7322: 10 FB
+        djnz    EDITOR_SHIFT_LEFT_LOOP                         ;#7322: 10 FB
         jr      EDITOR_AFTER_KEY                               ;#7324: 18 26
 
 EDITOR_SHIFT_UP:
-        ; 1Eh arm — LDIR-up rotate (row 0 stashed, rows shift up, restored at bottom)
-        cp      1Eh                                            ;#7326: FE 1E
+        ; Test for CHAR_CURSOR_UP (1Eh) — LDIR-up rotate (row 0 → bottom)
+        cp      CHAR_CURSOR_UP                                 ;#7326: FE 1E
         jr      nz,EDITOR_SHIFT_DOWN                           ;#7328: 20 0E
         push    hl                                             ;#732A: E5
         pop     de                                             ;#732B: D1
@@ -9523,8 +9560,8 @@ EDITOR_SHIFT_UP:
         jr      EDITOR_AFTER_KEY                               ;#7336: 18 14
 
 EDITOR_SHIFT_DOWN:
-        ; 1Fh arm — LDDR-down rotate (last row stashed, rows shift down, restored at top)
-        cp      1Fh                                            ;#7338: FE 1F
+        ; Test for CHAR_CURSOR_DOWN (1Fh) — LDDR-down rotate (last row → top)
+        cp      CHAR_CURSOR_DOWN                               ;#7338: FE 1F
         jp      nz,EDITOR_KEY_INPUT                            ;#733A: C2 A2 72
         ld      bc,7                                           ;#733D: 01 07 00
         add     hl,bc                                          ;#7340: 09
@@ -9546,22 +9583,22 @@ EDITOR_AFTER_KEY:
 EDITOR_DM_NAV_INIT:
         ; 'M' command — clear BC, dispatch on arrow key to ±1 (DM_ZAP_MODE)
         ld      bc,0                                           ;#7352: 01 00 00
-        cp      1Ch                                            ;#7355: FE 1C
-        jr      nz,EDITOR_DM_NAV_RIGHT                         ;#7357: 20 01
+        cp      CHAR_CURSOR_RIGHT                              ;#7355: FE 1C
+        jr      nz,EDITOR_DM_NAV_LEFT                          ;#7357: 20 01
         inc     c                                              ;#7359: 0C
-EDITOR_DM_NAV_RIGHT:
-        ; 1Dh — dec C (right wraparound)
-        cp      1Dh                                            ;#735A: FE 1D
+EDITOR_DM_NAV_LEFT:
+        ; CHAR_CURSOR_LEFT (1Dh) — dec C (one column back)
+        cp      CHAR_CURSOR_LEFT                               ;#735A: FE 1D
         jr      nz,EDITOR_DM_NAV_UP                            ;#735C: 20 01
         dec     c                                              ;#735E: 0D
 EDITOR_DM_NAV_UP:
-        ; 1Eh — dec B (one row up)
-        cp      1Eh                                            ;#735F: FE 1E
+        ; CHAR_CURSOR_UP (1Eh) — dec B (one row up)
+        cp      CHAR_CURSOR_UP                                 ;#735F: FE 1E
         jr      nz,EDITOR_DM_NAV_DOWN                          ;#7361: 20 01
         dec     b                                              ;#7363: 05
 EDITOR_DM_NAV_DOWN:
-        ; 1Fh — inc B (one row down)
-        cp      1Fh                                            ;#7364: FE 1F
+        ; CHAR_CURSOR_DOWN (1Fh) — inc B (one row down)
+        cp      CHAR_CURSOR_DOWN                               ;#7364: FE 1F
         jr      nz,EDITOR_DM_NAV_APPLY                         ;#7366: 20 01
         inc     b                                              ;#7368: 04
 EDITOR_DM_NAV_APPLY:
@@ -9699,7 +9736,7 @@ DM_PRINT_OFFSET_VALUE:
         jr      z,DM_INIT_AND_REDRAW                           ;#743E: 28 03
         ld      (MEGA_HEADER_TYPE),hl                          ;#7440: 22 30 FA
 DM_INIT_AND_REDRAW:
-        ; DM/ZAP entry: CHECK_DM_ZAP_MODE; if ZAP, prep PHYDIO buffer (764F); paint screen
+        ; DM/ZAP entry: CHECK_DM_ZAP_MODE; ZAP→DISK_PHYDIO_READ first, then paint screen
         call    CHECK_DM_ZAP_MODE                              ;#7443: CD B2 76
         call    nz,DISK_PHYDIO_READ                            ;#7446: C4 4F 76
 DM_REDRAW_AND_LOOP:
@@ -9718,7 +9755,7 @@ DM_LOOP:
 
 DM_KEY_CR:
         ; CR key (0Dh) — reposition cursor at (1,14h) and return
-        cp      0Dh                                            ;#7460: FE 0D
+        cp      "\r"                                           ;#7460: FE 0D
         jp      nz,DM_KEY_W                                    ;#7462: C2 6C 74
         ld      hl,114h                                        ;#7465: 21 14 01
         call    BIOS_POSIT                                     ;#7468: CD C6 00
@@ -9735,7 +9772,7 @@ DM_KEY_W:
 
 DM_KEY_ESC:
         ; ESC key (1Bh) — page back: HEADER_TYPE -= 80h, prompt save when needed
-        cp      1Bh                                            ;#747A: FE 1B
+        cp      CHAR_ESC                                       ;#747A: FE 1B
         jr      nz,DM_KEY_TAB                                  ;#747C: 20 27
 DM_KEY_ESC_PAGEBACK:
         ; Subtract 80h from HEADER_TYPE for ESC page-back logic
@@ -9781,29 +9818,29 @@ DM_KEY_PAGEFWD:
         jp      DM_INIT_AND_REDRAW                             ;#74CD: C3 43 74
 
 DM_KEY_ARROW_DISPATCH:
-        ; Arrow-key dispatch gate: range-check 1Ch..1Fh
-        cp      1Ch                                            ;#74D0: FE 1C
+        ; Arrow-key dispatch gate: range-check CHAR_CURSOR_RIGHT..CHAR_CURSOR_DOWN
+        cp      CHAR_CURSOR_RIGHT                              ;#74D0: FE 1C
         jp      c,DM_KEY_OTHER                                 ;#74D2: DA 26 75
         cp      " "                                            ;#74D5: FE 20
         jp      nc,DM_KEY_OTHER                                ;#74D7: D2 26 75
         ld      hl,(MEGA_SCRATCH_W2)                           ;#74DA: 2A 32 FA
         ld      de,0                                           ;#74DD: 11 00 00
-        cp      1Ch                                            ;#74E0: FE 1C
+        cp      CHAR_CURSOR_RIGHT                              ;#74E0: FE 1C
         jr      nz,DM_ARROW_TRY_LEFT                           ;#74E2: 20 01
         inc     d                                              ;#74E4: 14
 DM_ARROW_TRY_LEFT:
-        ; Test for 1Dh (left) — d -= 1 on match
-        cp      1Dh                                            ;#74E5: FE 1D
+        ; Test for CHAR_CURSOR_LEFT (1Dh) — d -= 1 on match
+        cp      CHAR_CURSOR_LEFT                               ;#74E5: FE 1D
         jr      nz,DM_ARROW_TRY_UP                             ;#74E7: 20 01
         dec     d                                              ;#74E9: 15
 DM_ARROW_TRY_UP:
-        ; Test for 1Eh (up) — e -= 1 on match
-        cp      1Eh                                            ;#74EA: FE 1E
+        ; Test for CHAR_CURSOR_UP (1Eh) — e -= 1 on match
+        cp      CHAR_CURSOR_UP                                 ;#74EA: FE 1E
         jr      nz,DM_ARROW_TRY_DOWN                           ;#74EC: 20 01
         dec     e                                              ;#74EE: 1D
 DM_ARROW_TRY_DOWN:
-        ; Test for 1Fh (down) — e += 1 on match
-        cp      1Fh                                            ;#74EF: FE 1F
+        ; Test for CHAR_CURSOR_DOWN (1Fh) — e += 1 on match
+        cp      CHAR_CURSOR_DOWN                               ;#74EF: FE 1F
         jr      nz,DM_APPLY_CURSOR_DELTA                       ;#74F1: 20 01
         inc     e                                              ;#74F3: 1C
 DM_APPLY_CURSOR_DELTA:
@@ -9958,7 +9995,7 @@ DM_ASCII_CELL_EMIT:
         jp      BIOS_CHPUT                                     ;#75C2: C3 A2 00
 
 DM_FETCH_AT_ROW_COL:
-        ; Compute HL = (FA30) + E*8 + D, call DM_FETCH_BYTE; A = byte at row/col
+        ; Compute HL = MEGA_HEADER_TYPE + E*8 + D, call DM_FETCH_BYTE; A = byte at row/col
         ld      bc,(MEGA_HEADER_TYPE)                          ;#75C5: ED 4B 30 FA
         ld      l,e                                            ;#75C9: 6B
         ld      h,0                                            ;#75CA: 26 00
@@ -10025,7 +10062,7 @@ DM_PAGE_ASCII_OUT:
         ret                                                    ;#7625: C9
 
 EDITOR_DISPLAY_ADDR:
-        ; Position (10,18); fetch byte at (FA32), print as hex; show data preview per mode
+        ; Position (10,18); fetch byte at MEGA_SCRATCH_W2, print hex; preview per mode
         ld      hl,0A12h                                       ;#7626: 21 12 0A
         call    BIOS_POSIT                                     ;#7629: CD C6 00
         ld      de,(MEGA_SCRATCH_W2)                           ;#762C: ED 5B 32 FA
@@ -10072,7 +10109,7 @@ DISK_REPORT_SECTOR:
         jp      PRINT_HEX_HL                                   ;#7677: C3 9E 50
 
 DM_FETCH_BYTE:
-        ; Read byte at HL (slot-aware in ZAP; DIRBUF-base in DM); add (FA38) to A
+        ; Read byte at HL (slot-aware in ZAP; DIRBUF-base in DM); add MEGA_DM_OFFSET to A
         call    CHECK_DM_ZAP_MODE                              ;#767A: CD B2 76
         jp      z,DM_FETCH_BYTE_ZAP                            ;#767D: CA 8C 76
         push    hl                                             ;#7680: E5
@@ -10118,7 +10155,7 @@ DM_WRITE_BYTE:
         ret                                                    ;#76B1: C9
 
 CHECK_DM_ZAP_MODE:
-        ; Tiny helper — load DM_ZAP_MODE (FA37), set flags (Z = display, NZ = zap)
+        ; Tiny helper — load DM_ZAP_MODE, set flags (Z = display, NZ = zap)
         ld      a,(DM_ZAP_MODE)                                ;#76B2: 3A 37 FA
         or      a                                              ;#76B5: B7
         ret                                                    ;#76B6: C9
@@ -10135,11 +10172,11 @@ EDITOR_PROMPT_SAVE:
         call    z,DISK_PHYDIO_WRITE                            ;#76DD: CC 5F 76
         ld      hl,114h                                        ;#76E0: 21 14 01
         call    BIOS_POSIT                                     ;#76E3: CD C6 00
-        ld      b,1Fh                                          ;#76E6: 06 1F
+        ld      b,31                                           ;#76E6: 06 1F
         ld      a," "                                          ;#76E8: 3E 20
 
 EDITOR_PROMPT_SAVE_CLEAR_LOOP:
-        ; 1Fh space rst 18h clear of save-prompt row
+        ; Print 31 spaces via RST 18h (OUTDO) — overwrites the save-prompt row
         rst     18h                                            ;#76EA: DF
         djnz    EDITOR_PROMPT_SAVE_CLEAR_LOOP                  ;#76EB: 10 FD
         ret                                                    ;#76ED: C9
@@ -10415,7 +10452,7 @@ RENEW_TOKEN_LOOP:
         cp      0Fh                                            ;#785E: FE 0F
         jr      nc,RENEW_TOKEN_TEST_LIT                        ;#7860: 30 04
 RENEW_SKIP_TWO:
-        ; 1Ch numeric-literal token — skip 2 bytes then loop
+        ; BASIC_TOK_INT body — skip 2 bytes (16-bit integer literal) then loop
         inc     hl                                             ;#7862: 23
         inc     hl                                             ;#7863: 23
         jr      RENEW_TOKEN_LOOP                               ;#7864: 18 F3
@@ -10428,12 +10465,12 @@ RENEW_TOKEN_TEST_LIT:
         jr      RENEW_TOKEN_LOOP                               ;#786B: 18 EC
 
 RENEW_TOKEN_TEST_NUM:
-        ; A!=0Fh — test for 1Bh/1Ch/1Dh numeric-literal token classes
-        cp      1Bh                                            ;#786D: FE 1B
+        ; A!=0Fh — test for CHAR_ESC and BASIC_TOK_INT/SINGLE/DOUBLE literals
+        cp      CHAR_ESC                                       ;#786D: FE 1B
         jr      c,RENEW_TOKEN_LOOP                             ;#786F: 38 E8
-        cp      1Ch                                            ;#7871: FE 1C
+        cp      BASIC_TOK_INT                                  ;#7871: FE 1C
         jr      z,RENEW_SKIP_TWO                               ;#7873: 28 ED
-        cp      1Dh                                            ;#7875: FE 1D
+        cp      BASIC_TOK_SINGLE                               ;#7875: FE 1D
         jr      nz,RENEW_TOKEN_TEST_DBL                        ;#7877: 20 06
         ld      de,4                                           ;#7879: 11 04 00
 RENEW_SKIP_ADD:
@@ -10443,7 +10480,7 @@ RENEW_SKIP_ADD:
 
 RENEW_TOKEN_TEST_DBL:
         ; A!=1Dh — test for 1Fh double-precision token → skip 8 bytes
-        cp      1Fh                                            ;#787F: FE 1F
+        cp      BASIC_TOK_DOUBLE                               ;#787F: FE 1F
         jr      nz,RENEW_TOKEN_LOOP                            ;#7881: 20 D6
         ld      de,8                                           ;#7883: 11 08 00
         jr      RENEW_SKIP_ADD                                 ;#7886: 18 F4
@@ -10510,6 +10547,10 @@ BVERIFY_SYNC_LOOP:
         call    BIOS_TAPIN                                     ;#78D2: CD E4 00
         pop     bc                                             ;#78D5: C1
         ret     c                                              ;#78D6: D8
+        ; D0h here is the MSX cassette sync byte (the lead-in stream that
+        ; TAPION/TAPIN-based formats emit 10 times at the start of each block).
+        ; NOT related to ID_HEADER_BINARY despite the matching hex value —
+        ; sync bytes come BEFORE the header, the type marker comes after.
         cp      0D0h                                           ;#78D7: FE D0
         jr      nz,BVERIFY_READ_HEADER                         ;#78D9: 20 F0
         djnz    BVERIFY_SYNC_LOOP                              ;#78DB: 10 F4
@@ -10646,11 +10687,11 @@ MEGA_HEADER_PRINT_FILNAM_LOOP:
         call    PRINT_INLINE_STRING                            ;#7983: CD 8A 50
         db      "Tipo:"C                                       ;#7986: 54 69 70 6F BA
         ld      a,(MEGA_HEADER_TYPE)                           ;#798B: 3A 30 FA
-        cp      0D0h                                           ;#798E: FE D0
+        cp      ID_HEADER_BINARY                               ;#798E: FE D0
         jr      z,MEGA_HEADER_PRINT_BIN                        ;#7990: 28 28
-        cp      0D3h                                           ;#7992: FE D3
+        cp      ID_HEADER_BASIC                                ;#7992: FE D3
         jr      z,MEGA_HEADER_PRINT_BASIC                      ;#7994: 28 1A
-        cp      0EAh                                           ;#7996: FE EA
+        cp      ID_HEADER_ASCII                                ;#7996: FE EA
         jr      z,MEGA_HEADER_PRINT_ASCII                      ;#7998: 28 0C
         call    PRINT_INLINE_STRING                            ;#799A: CD 8A 50
         db      "Ilegal", 87h                                  ;#799D: 49 6C 65 67 61 6C 87
@@ -10729,7 +10770,7 @@ LOAD_OPEN_DEVICE_CHECK:
         cp      ":"                                            ;#7A46: FE 3A
         jp      z,LOAD_FILE_OPEN                               ;#7A48: CA F0 7C
         ld      a,(BIOS_HTIMI)                                 ;#7A4B: 3A 9F FD
-        cp      0C9h                                           ;#7A4E: FE C9
+        cp      Z80_RET                                        ;#7A4E: FE C9
         jp      z,LOAD_FILE_OPEN                               ;#7A50: CA F0 7C
         ld      de,MEGA_FILE_BUFFER                            ;#7A53: 11 76 F9
         ld      c,BDOS_SETDTA                                  ;#7A56: 0E 1A
@@ -10813,7 +10854,7 @@ MEGA_PCMD_SAVE:
         cp      ":"                                            ;#7AFE: FE 3A
         jp      z,TAPE_BIN_SAVE_START                          ;#7B00: CA 74 7C
         ld      a,(BIOS_HTIMI)                                 ;#7B03: 3A 9F FD
-        cp      0C9h                                           ;#7B06: FE C9
+        cp      Z80_RET                                        ;#7B06: FE C9
         jp      z,TAPE_BIN_SAVE_START                          ;#7B08: CA 74 7C
         ld      c,BDOS_SETDTA                                  ;#7B0B: 0E 1A
         ld      de,MEGA_FILE_BUFFER                            ;#7B0D: 11 76 F9
@@ -11113,7 +11154,7 @@ TAPE_BIN_SAVE_LOOP:
         rst     20h                                            ;#7CC4: E7
         jr      nz,TAPE_BIN_SAVE_LOOP                          ;#7CC5: 20 F0
         call    BIOS_TAPOOF                                    ;#7CC7: CD F0 00
-        ld      a,0FBh                                         ;#7CCA: 3E FB
+        ld      a,Z80_EI                                       ;#7CCA: 3E FB
         ld      (MEGA_HOOK_EI_PATCH),a                         ;#7CCC: 32 0E FA
         ret                                                    ;#7CCF: C9
 
@@ -11139,7 +11180,7 @@ TAPE_READ_WORD_HL:
 TAPE_ERROR_EXIT:
         ; Tape error tail — TAPIOF + restore EI patch + jp SYNTAX_ERROR_LF
         call    BIOS_TAPIOF                                    ;#7CE5: CD E7 00
-        ld      a,0FBh                                         ;#7CE8: 3E FB
+        ld      a,Z80_EI                                       ;#7CE8: 3E FB
         ld      (MEGA_HOOK_EI_PATCH),a                         ;#7CEA: 32 0E FA
         jp      SYNTAX_ERROR_LF                                ;#7CED: C3 47 43
 
@@ -11242,7 +11283,7 @@ TAPE_LOAD_BYTE_LOOP:
         inc     hl                                             ;#7D92: 23
         rst     20h                                            ;#7D93: E7
         jr      nz,TAPE_LOAD_BYTE_LOOP                         ;#7D94: 20 EF
-        ld      a,0FBh                                         ;#7D96: 3E FB
+        ld      a,Z80_EI                                       ;#7D96: 3E FB
         ld      (MEGA_HOOK_EI_PATCH),a                         ;#7D98: 32 0E FA
         jp      BIOS_TAPIOF                                    ;#7D9B: C3 E7 00
 
@@ -11435,13 +11476,30 @@ DUMP_SCRMOD_NONGREY:
         ; Non-grey SCR1+ branch — set DE=820h (page bytes)
         ld      de,820h                                        ;#7EC1: 11 20 08
 DUMP_EMIT_PCL_HEADER:
-        ; Emit PCL ESC sequences (1B, "L" or "K", LSB, MSB) to start a bit-image row
-        ld      a,1Bh                                          ;#7EC4: 3E 1B
+        ; Emit Epson `ESC L`/`ESC K` + 16-bit width to start one bit-image row
+        ; Epson FX/RX printer-control sequence emitted at the START of each
+        ; bit-image row in the screen-dump routine. The DUMP_BYTE_TO_LPT calls
+        ; at 7EC4-7EDA form the byte stream:
+        ; 1Bh        ESC (escape sequence introducer)
+        ; 4Bh / 4Ch  'K' or 'L' — selects bit-image density
+        ; 'L' (4Ch) — double-density 120 dpi (used in colour mode)
+        ; 'K' (4Bh) — single-density 60 dpi  (used in grey  mode)
+        ; nnnn       16-bit little-endian dot-count for the row
+        ; Both `ESC K nnnn` and `ESC L nnnn` enter Epson's bit-image graphics
+        ; mode for `nnnn` dot columns, with the printer reading one byte per
+        ; column where bit 7 of each byte is the top dot. The K/L choice
+        ; trades horizontal resolution for printer compatibility — every Epson
+        ; FX/RX supports both, but grey-mode prints stay at single-density
+        ; because the source image only has ~50% as many distinguishable
+        ; levels (1bpp pattern + colour byte halved). The companion ESC at
+        ; 7F5F (ESC J 24) closes each row by advancing the paper by exactly
+        ; one 24-dot band so the next ESC K/L row prints with no white gap.
+        ld      a,CHAR_ESC                                     ;#7EC4: 3E 1B
         call    DUMP_BYTE_TO_LPT                               ;#7EC6: CD 8E 7F
-        ld      a,4Ch                                          ;#7EC9: 3E 4C
+        ld      a,"L"                                          ;#7EC9: 3E 4C
         call    CHECK_GREY_MODE                                ;#7ECB: CD 9A 68
         jr      nz,DUMP_EMIT_PCL_CODE                          ;#7ECE: 20 02
-        ld      a,4Bh                                          ;#7ED0: 3E 4B
+        ld      a,"K"                                          ;#7ED0: 3E 4B
 DUMP_EMIT_PCL_CODE:
         ; Emit selected PCL code (K or L) and width word to LPT
         call    DUMP_BYTE_TO_LPT                               ;#7ED2: CD 8E 7F
@@ -11542,11 +11600,26 @@ DUMP_EMIT_TRIPLE:
         jr      nz,DUMP_RENDER_LOOP                            ;#7F58: 20 85
         ld      a,"\r"                                         ;#7F5A: 3E 0D
         call    DUMP_BYTE_TO_LPT                               ;#7F5C: CD 8E 7F
-        ld      a,1Bh                                          ;#7F5F: 3E 1B
+        ; Epson FX/RX printer-control sequence emitted at the end of every
+        ; bit-image row in the screen-dump routine. The four DUMP_BYTE_TO_LPT
+        ; calls at 7F5A-7F6B form the byte stream:
+        ; 0Dh         CR — carriage return (head to leftmost column)
+        ; 1Bh 4Ah 18h ESC J 24 — Epson "advance paper 24/216 inch"
+        ; ESC J n is the Epson fine-line-feed command: it moves the paper by
+        ; n/216 of an inch without changing the standard line spacing. Here
+        ; n = 24 (decimal 24, hex 18h), giving 24/216 = 1/9 inch — exactly
+        ; the height of one 24-dot bit-image band, so the next row prints
+        ; immediately below the one just emitted, with no white gap. (Triple-
+        ; density bit-image graphics are 24 dots tall, which is why the
+        ; advance is 24/216 rather than the usual 1/6 inch line spacing.)
+        ; The companion ESC sequence at 7EC4 (ESC L/K nnn — set up an n-dot
+        ; single-density / double-density bit-image row) opens each row that
+        ; this trailer then closes.
+        ld      a,CHAR_ESC                                     ;#7F5F: 3E 1B
         call    DUMP_BYTE_TO_LPT                               ;#7F61: CD 8E 7F
-        ld      a,4Ah                                          ;#7F64: 3E 4A
+        ld      a,"J"                                          ;#7F64: 3E 4A
         call    DUMP_BYTE_TO_LPT                               ;#7F66: CD 8E 7F
-        ld      a,18h                                          ;#7F69: 3E 18
+        ld      a,24                                           ;#7F69: 3E 18
         call    DUMP_BYTE_TO_LPT                               ;#7F6B: CD 8E 7F
         call    CHECK_GREY_MODE                                ;#7F6E: CD 9A 68
         jr      z,DUMP_CELL_ADVANCE                            ;#7F71: 28 0F
@@ -11627,7 +11700,7 @@ MEGA_RETURN_TO_BASIC:
         ret                                                    ;#7FE6: C9
 
 INSTALL_HKEYC_NULL:
-        ; Save current HKEYC (FDCCh) to FFD9h, then write `ret` (C9h) to FDCCh
+        ; Save BIOS_HKEYC byte into MEGA_HKEYC_SAVE, then patch BIOS_HKEYC with Z80_RET
         ld      a,(BIOS_HKEYC)                                 ;#7FE7: 3A CC FD
         ld      (MEGA_HKEYC_SAVE),a                            ;#7FEA: 32 D9 FF
         ld      a,Z80_RET                                      ;#7FED: 3E C9
